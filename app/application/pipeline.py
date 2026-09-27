@@ -59,15 +59,15 @@ class Stage(StrEnum):
 
 
 STAGE_LABELS = {
-    Stage.AUDIO: "Extrayendo audio",
-    Stage.SEPARATION: "Separando la voz",
-    Stage.LANGUAGE: "Detectando idioma",
-    Stage.TRANSCRIPTION: "Transcribiendo",
-    Stage.UNITS: "Segmentando",
-    Stage.REVIEW: "Revisando la transcripción",
-    Stage.TRANSLATION: "Traduciendo",
-    Stage.CUES: "Creando subtítulos",
-    Stage.EXPORT: "Exportando",
+    Stage.AUDIO: "Extracting audio",
+    Stage.SEPARATION: "Isolating voice",
+    Stage.LANGUAGE: "Detecting language",
+    Stage.TRANSCRIPTION: "Transcribing",
+    Stage.UNITS: "Segmenting",
+    Stage.REVIEW: "Reviewing transcript",
+    Stage.TRANSLATION: "Translating",
+    Stage.CUES: "Building subtitles",
+    Stage.EXPORT: "Exporting",
 }
 
 CACHEABLE_STAGES = [stage.value for stage in Stage if stage is not Stage.EXPORT]
@@ -326,7 +326,7 @@ class Pipeline:
         try:
             data = self._run_stage(Stage.REVIEW, params, compute, upstream=units_key)
         except LanguageModelError as error:
-            self._warn(f"No se pudo revisar la transcripción ({error}); se usa tal cual.")
+            self._warn(f"Could not review the transcript ({error}); using it as is.")
             self.state.keys[Stage.REVIEW] = units_key + "-failed"
             return units
         apply_corrections(units, data["corrections"])
@@ -358,8 +358,8 @@ class Pipeline:
                 units, request, system_prompt, self._fraction_reporter(Stage.TRANSLATION)
             )
             if not result and units:
-                detail = report.errors[-1] if report.errors else "respuestas inválidas"
-                raise LanguageModelError(f"No se pudo traducir nada: {detail}")
+                detail = report.errors[-1] if report.errors else "invalid responses"
+                raise LanguageModelError(f"Nothing could be translated: {detail}")
             return {
                 "translations": _string_keys(result),
                 "corrections": _string_keys(report.corrections),
@@ -423,14 +423,14 @@ class Pipeline:
         for unit in units:
             unit.translation = unit.text
         self.state.keys[Stage.TRANSLATION] = self.state.keys[Stage.REVIEW] + "-same-language"
-        self.state.backends["translation"] = "sin traducción (mismo idioma)"
+        self.state.backends["translation"] = "not translated (same language)"
         if self._language_model is not None:
             self._language_model.unload()
         return units
 
     def _prepare_language_model(self, model: LanguageModel, stage: Stage) -> None:
         def report_download(fraction: float, status: str) -> None:
-            self.progress(stage, fraction * 0.5, f"Descargando modelo: {status}")
+            self.progress(stage, fraction * 0.5, f"Downloading model: {status}")
 
         for warning in model.prepare(report_download):
             self._warn(warning)
@@ -442,7 +442,7 @@ class Pipeline:
 
     def _current_speech_audio(self) -> Path:
         if self.state.speech_audio is None:
-            raise PipelineError("No hay audio extraído del archivo.")
+            raise PipelineError("No audio was extracted from the file.")
         return self.state.speech_audio
 
     def _release_transcriber(self) -> None:
@@ -475,7 +475,7 @@ class Pipeline:
         elapsed = time.perf_counter() - started
         self.state.keys[stage] = result.key
         self.state.records.append(StageRecord(stage, round(elapsed, 2), result.from_cache))
-        suffix = " (caché)" if result.from_cache else f" ({elapsed:.1f} s)"
+        suffix = " (cached)" if result.from_cache else f" ({elapsed:.1f} s)"
         self.progress(stage, 1.0, STAGE_LABELS[stage] + suffix)
         return result.data
 

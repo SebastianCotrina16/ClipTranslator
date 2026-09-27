@@ -47,7 +47,7 @@ class InvalidLanguageCodeError(ValueError):
 def parse_language_code(value: str) -> str:
     code = value.strip().lower()
     if not _LANGUAGE_CODE.match(code):
-        raise InvalidLanguageCodeError(f"Código de idioma no válido: {value!r} (ej.: es, en, pt).")
+        raise InvalidLanguageCodeError(f"Invalid language code: {value!r} (e.g. es, en, pt).")
     return code
 
 

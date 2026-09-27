@@ -11,6 +11,7 @@ from functools import cache
 from pathlib import Path
 
 from app.application.setup_advisor import GpuSummary
+from app.infrastructure.process import run_hidden
 
 LARGE_VRAM_MB = 10_000
 HUGE_VRAM_MB = 20_000
@@ -44,7 +45,7 @@ def _query(field: str) -> list[str] | None:
     if executable is None:
         return None
     try:
-        output = subprocess.run(
+        output = run_hidden(
             [executable, f"--query-gpu={field}", "--format=csv,noheader,nounits"],
             capture_output=True,
             text=True,
@@ -117,5 +118,5 @@ def default_translation_model() -> str:
 def describe_hardware() -> str:
     gpu = detect_gpu()
     defaults = whisper_defaults()
-    gpu_text = f"{gpu.name} ({gpu.vram_mb} MB)" if gpu else "sin GPU NVIDIA"
-    return f"{gpu_text} → Whisper {defaults.model} en {defaults.device} ({defaults.compute_type})"
+    gpu_text = f"{gpu.name} ({gpu.vram_mb} MB)" if gpu else "no NVIDIA GPU"
+    return f"{gpu_text} → Whisper {defaults.model} on {defaults.device} ({defaults.compute_type})"

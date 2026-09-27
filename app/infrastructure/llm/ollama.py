@@ -72,8 +72,8 @@ class OllamaModel:
     def prepare(self, progress: Callable[[float, str], None] | None = None) -> list[str]:
         if not self.is_running():
             raise LanguageModelError(
-                f"Ollama no responde. Ábrelo (o instálalo desde {OLLAMA_DOWNLOAD_URL}) "
-                "o elige la traducción por API."
+                f"Ollama is not responding. Open it (or install it from {OLLAMA_DOWNLOAD_URL}) "
+                "or choose API translation in Settings."
             )
         warnings = [] if self.is_loaded() else self._vram_warnings()
         self.pull(progress)
@@ -91,7 +91,7 @@ class OllamaModel:
                 for line in response.iter_lines():
                     self._handle_pull_event(line, progress)
         except httpx.HTTPError as error:
-            raise LanguageModelError(f"No se pudo descargar {self.model}: {error}") from error
+            raise LanguageModelError(f"Could not download {self.model}: {error}") from error
 
     @staticmethod
     def _handle_pull_event(line: str, progress: Callable[[float, str], None] | None) -> None:
@@ -142,8 +142,8 @@ class OllamaModel:
         if size is None or free is None or free / 1024 >= size * VRAM_HEADROOM:
             return []
         return [
-            f"Solo hay {free / 1024:.1f} GB libres en la GPU y {self.model} necesita unos "
-            f"{size * VRAM_HEADROOM:.0f} GB: parte irá a la CPU y la traducción será mucho más "
-            "lenta. Cierra programas que usen la GPU (juegos, OBS, navegador con aceleración) "
-            "o elige un modelo más pequeño."
+            f"Only {free / 1024:.1f} GB free on the GPU and {self.model} needs about "
+            f"{size * VRAM_HEADROOM:.0f} GB: part of it will run on the CPU and translation "
+            "will be much slower. Close programs using the GPU (games, OBS, "
+            "hardware-accelerated browsers) or choose a smaller model."
         ]

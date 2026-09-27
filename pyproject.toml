@@ -11,6 +11,7 @@ dependencies = [
     "httpx>=0.27",
     "platformdirs>=4.0",
     "tomli-w>=1.0",
+    "pyside6>=6.7",
 ]
 
 [project.optional-dependencies]
@@ -29,7 +30,9 @@ cpu = [
 
 [project.scripts]
 cliptranslator = "app.presentation.cli:main"
-cliptranslator-setup = "app.presentation.wizard:main"
+
+[project.gui-scripts]
+cliptranslator-app = "app.presentation.gui.__main__:main"
 
 [dependency-groups]
 dev = [
@@ -68,6 +71,7 @@ ignore = ["S603", "S607"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
+"app/presentation/gui/*" = ["N802"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

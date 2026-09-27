@@ -53,7 +53,7 @@ def cpu_name() -> str:
             return str(winreg.QueryValueEx(key, "ProcessorNameString")[0]).strip()
         except OSError:
             pass
-    return platform.processor() or "desconocida"
+    return platform.processor() or "unknown"
 
 
 def onnx_runtime_uses_cuda() -> bool:

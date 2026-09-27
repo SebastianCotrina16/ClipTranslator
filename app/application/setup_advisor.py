@@ -16,24 +16,24 @@ class ModelOption:
 
 
 WHISPER_MODELS = (
-    ModelOption("large-v3", "Whisper large-v3", 3.1, "máxima precisión"),
-    ModelOption("large-v2", "Whisper large-v2", 3.1, "alternativa; a veces inventa menos texto"),
-    ModelOption("large-v3-turbo", "Whisper large-v3-turbo", 1.6, "más rápido, menos preciso"),
-    ModelOption("medium", "Whisper medium", 1.5, "solo para equipos modestos"),
+    ModelOption("large-v3", "Whisper large-v3", 3.1, "highest accuracy"),
+    ModelOption("large-v2", "Whisper large-v2", 3.1, "alternative; sometimes invents less text"),
+    ModelOption("large-v3-turbo", "Whisper large-v3-turbo", 1.6, "faster, less accurate"),
+    ModelOption("medium", "Whisper medium", 1.5, "only for modest hardware"),
 )
 
 TRANSLATION_MODELS = (
-    ModelOption("qwen3.5:4b", "Qwen 3.5 4B", 3.4, "ligero; calidad justa con jerga"),
-    ModelOption("qwen3.5:9b", "Qwen 3.5 9B", 6.6, "buen equilibrio"),
-    ModelOption("qwen3.5:27b", "Qwen 3.5 27B", 17.0, "la mejor calidad local"),
+    ModelOption("qwen3.5:4b", "Qwen 3.5 4B", 3.4, "light; weaker with slang"),
+    ModelOption("qwen3.5:9b", "Qwen 3.5 9B", 6.6, "good balance"),
+    ModelOption("qwen3.5:27b", "Qwen 3.5 27B", 17.0, "best local quality"),
 )
 
 
 class ModelFit(StrEnum):
-    FITS_GPU = "cabe en tu GPU"
-    PARTLY_GPU = "casi cabe: una parte irá a la CPU (más lento)"
-    CPU_ONLY = "irá en la CPU (lento)"
-    TOO_BIG = "no cabe en tu equipo"
+    FITS_GPU = "fits in your GPU"
+    PARTLY_GPU = "almost fits: part runs on the CPU (slower)"
+    CPU_ONLY = "runs on the CPU (slow)"
+    TOO_BIG = "too big for this computer"
 
 
 @dataclass(frozen=True)
@@ -108,8 +108,8 @@ def recommend(report: SystemReport) -> Recommendation:
         device, compute_type = "cpu", "int8"
         whisper_model = "large-v3-turbo" if report.ram_gb >= 8 else "medium"
         warnings.append(
-            "Sin GPU compatible la transcripción irá en la CPU: un clip de 5 min puede "
-            "tardar bastante más que en tiempo real."
+            "Without a compatible GPU, transcription runs on the CPU: a 5-minute clip can "
+            "take much longer than real time."
         )
     fits = {option.key: model_fit(option.size_gb, report) for option in TRANSLATION_MODELS}
     on_gpu = [
@@ -122,11 +122,11 @@ def recommend(report: SystemReport) -> Recommendation:
     else:
         translation_model = TRANSLATION_MODELS[0].key
         warnings.append(
-            "La traducción local irá en la CPU y la calidad del modelo pequeño es limitada; "
-            "si tienes una clave de API (Anthropic/OpenAI) la traducción será mejor."
+            "Local translation runs on the CPU and the small model has limited quality; "
+            "an API key (Anthropic/OpenAI) gives better translations."
         )
     if report.ram_gb and report.ram_gb < 8:
-        warnings.append(f"Solo hay {report.ram_gb:.0f} GB de RAM; los modelos grandes irán justos.")
+        warnings.append(f"Only {report.ram_gb:.0f} GB of RAM; large models will be tight.")
     return Recommendation(
         whisper_model=whisper_model,
         device=device,
@@ -142,11 +142,11 @@ def _hardware_warnings(report: SystemReport) -> list[str]:
     warnings: list[str] = []
     if report.gpu is not None and not report.driver_ok:
         warnings.append(
-            f"El driver de NVIDIA ({report.gpu.driver or '?'}) es antiguo para CUDA 12: "
-            "actualízalo desde nvidia.com para usar la GPU."
+            f"The NVIDIA driver ({report.gpu.driver or '?'}) is too old for CUDA 12: "
+            "update it from nvidia.com to use the GPU."
         )
     if report.gpu is not None and not report.gpu_usable:
-        warnings.append("Hay una GPU NVIDIA pero no se pudo usar con CUDA; se usará la CPU.")
+        warnings.append("An NVIDIA GPU was found but CUDA could not use it; the CPU will be used.")
     return warnings
 
 
@@ -156,3 +156,47 @@ def translation_model_size(key: str) -> float | None:
 
 def whisper_model_size(key: str) -> float | None:
     return next((option.size_gb for option in WHISPER_MODELS if option.key == key), None)
+
+
+@dataclass
+class SetupPlan:
+    whisper_model: str
+    device: str
+    compute_type: str
+    voice_isolation: bool
+    target_language: str
+    backend: str
+    translation_model: str = ""
+    api_model: str = ""
+    api_key: str = field(default="", repr=False)
+    api_base_url: str = ""
+
+    @property
+    def uses_ollama(self) -> bool:
+        return self.backend == "ollama"
+
+
+def plan_from(recommendation: Recommendation, target_language: str) -> SetupPlan:
+    return SetupPlan(
+        whisper_model=recommendation.whisper_model,
+        device=recommendation.device,
+        compute_type=recommendation.compute_type,
+        voice_isolation=recommendation.separation,
+        target_language=target_language,
+        backend="ollama",
+        translation_model=recommendation.translation_model,
+    )
+
+
+def pending_download_gb(
+    plan: SetupPlan,
+    whisper_ready: bool,
+    isolation_ready: bool,
+    installed_translation_models: list[str],
+) -> float:
+    size = 0.0 if whisper_ready else whisper_model_size(plan.whisper_model) or 0.0
+    if plan.voice_isolation and not isolation_ready:
+        size += SEPARATION_MODEL_GB
+    if plan.uses_ollama and plan.translation_model not in installed_translation_models:
+        size += translation_model_size(plan.translation_model) or 0.0
+    return size

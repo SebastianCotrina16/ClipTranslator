@@ -22,14 +22,11 @@ class OutputVocabulary:
     review: str
 
 
-_VOCABULARY = {
-    "es": OutputVocabulary("bilingue", "transcripcion", "(sin traducción)", "revisar"),
-    "en": OutputVocabulary("bilingual", "transcript", "(not translated)", "check"),
-}
+VOCABULARY = OutputVocabulary("bilingual", "transcript", "(not translated)", "check")
 
 
 def vocabulary_for(target_language: str) -> OutputVocabulary:
-    return _VOCABULARY.get(target_language, _VOCABULARY["en"])
+    return VOCABULARY
 
 
 def timestamp(seconds: float, separator: str = ",") -> str:

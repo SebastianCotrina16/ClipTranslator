@@ -17,8 +17,8 @@ GPU_STALL_SECONDS = 45.0
 CPU_STALL_SECONDS = 300.0
 PROGRESS_PREFIX = "PROGRESS "
 GPU_STALL_WARNING = (
-    "La separación de voz en la GPU no respondió ({error}); se repitió en la CPU. "
-    "Suele pasar si un juego u otro programa está usando mucho la GPU."
+    "Voice isolation on the GPU stopped responding ({error}); it was redone on the CPU. "
+    "This usually happens when a game or another program is using the GPU heavily."
 )
 
 
@@ -61,7 +61,7 @@ class IsolatedVocalSeparator:
             warning = GPU_STALL_WARNING.format(error=outcome.error)
         outcome = self._run_worker(stereo_wav, output, "cpu", self.cpu_stall_seconds, progress)
         if not outcome.succeeded:
-            raise SeparationError(f"La separación de voz falló: {outcome.error}")
+            raise SeparationError(f"Voice isolation failed: {outcome.error}")
         return SeparationResult(output, "cpu", warning)
 
     def _command(self, source: Path, output: Path, device: str) -> list[str]:
@@ -111,7 +111,7 @@ class IsolatedVocalSeparator:
             output = process.stdout
             if output is None:
                 process.kill()
-                raise SeparationError("No se pudo leer el progreso de la separación.")
+                raise SeparationError("Could not read the voice isolation progress.")
 
             def follow_progress() -> None:
                 for line in output:
@@ -126,13 +126,13 @@ class IsolatedVocalSeparator:
                 if time.monotonic() - last_activity[0] > stall_seconds:
                     process.kill()
                     process.wait()
-                    return WorkerOutcome(False, f"sin progreso durante {stall_seconds:.0f} s")
+                    return WorkerOutcome(False, f"no progress for {stall_seconds:.0f} s")
                 time.sleep(0.25)
             reader.join(timeout=2)
             if process.returncode != 0:
                 error_log.seek(0)
                 tail = error_log.read().decode("utf-8", "replace").strip().splitlines()[-3:]
-                return WorkerOutcome(False, " | ".join(tail) or f"código {process.returncode}")
+                return WorkerOutcome(False, " | ".join(tail) or f"exit code {process.returncode}")
         return WorkerOutcome(True)
 
 
@@ -141,7 +141,7 @@ def _report_progress(fraction: float) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Separación de voz en un proceso aparte")
+    parser = argparse.ArgumentParser(description="Voice isolation in a separate process")
     parser.add_argument("source", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--model", required=True)

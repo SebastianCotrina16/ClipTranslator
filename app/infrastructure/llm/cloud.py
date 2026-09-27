@@ -11,22 +11,20 @@ from app.infrastructure.llm.http import parse_json_object, post_json, validated_
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 ANTHROPIC_MAX_TOKENS = 16000
-TOOL_NAME = "subtitulos"
+TOOL_NAME = "subtitles"
 
 
 def required_model_name(model: str, service: str) -> str:
     name = model.strip()
     if not name:
-        raise LanguageModelError(
-            f"Falta el nombre del modelo de {service}. Configúralo con el asistente."
-        )
+        raise LanguageModelError(f"Missing the {service} model name. Set it in Settings.")
     return name
 
 
 class AnthropicModel:
     def __init__(self, model: str, api_key: str, temperature: float = 0.3) -> None:
         if not api_key:
-            raise LanguageModelError("Falta la clave de la API de Anthropic (ANTHROPIC_API_KEY).")
+            raise LanguageModelError("Missing the Anthropic API key (ANTHROPIC_API_KEY).")
         self.model = required_model_name(model, "Anthropic")
         self.temperature = temperature
         self._client = httpx.Client(
@@ -51,7 +49,7 @@ class AnthropicModel:
             "tools": [
                 {
                     "name": TOOL_NAME,
-                    "description": "Entrega el resultado de los segmentos.",
+                    "description": "Returns the result for each segment.",
                     "input_schema": schema,
                 }
             ],
@@ -61,7 +59,7 @@ class AnthropicModel:
         for block in data.get("content", []):
             if block.get("type") == "tool_use" and isinstance(block.get("input"), dict):
                 return block["input"]
-        raise LanguageModelError("Anthropic no devolvió el resultado esperado.")
+        raise LanguageModelError("Anthropic did not return the expected result.")
 
     def unload(self) -> None:
         return None
@@ -69,7 +67,7 @@ class AnthropicModel:
 
 class OpenAICompatibleModel:
     def __init__(self, model: str, api_key: str, base_url: str, temperature: float = 0.3) -> None:
-        self.model = required_model_name(model, "la API compatible con OpenAI")
+        self.model = required_model_name(model, "OpenAI-compatible API")
         self.base_url = validated_base_url(base_url, require_tls_for_remote=True)
         self.temperature = temperature
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
@@ -99,7 +97,7 @@ class OpenAICompatibleModel:
         try:
             content = data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as error:
-            raise LanguageModelError("La API devolvió una respuesta inesperada.") from error
+            raise LanguageModelError("The API returned an unexpected response.") from error
         return parse_json_object(content)
 
     def unload(self) -> None:

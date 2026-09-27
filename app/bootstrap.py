@@ -11,7 +11,7 @@ from app.application.pipeline import (
     cue_rules_from,
 )
 from app.config.settings import Settings
-from app.config.store import data_dir, models_dir
+from app.config.store import data_dir, models_dir, whisper_models_dir
 from app.infrastructure.ffmpeg import FfmpegAudio
 from app.infrastructure.gpu import detect_gpu
 from app.infrastructure.llm.factory import create_language_model
@@ -19,10 +19,6 @@ from app.infrastructure.process import lower_current_process_priority
 from app.infrastructure.separation.worker import IsolatedVocalSeparator
 from app.infrastructure.subtitle_files import SubtitleFileWriter, safe_stem
 from app.infrastructure.whisper import FasterWhisperTranscriber, SileroSpeechDetector
-
-
-def whisper_models_dir() -> Path:
-    return models_dir() / "whisper"
 
 
 def build_services(settings: Settings) -> PipelineServices:

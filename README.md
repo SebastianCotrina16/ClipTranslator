@@ -20,19 +20,21 @@ App for detecting and translating languages in video and audio clips. It transcr
 ## Installation
 
 1. Download or clone this repository.
-2. Double-click `ClipTranslator.bat`.
+2. Double-click `ClipTranslator.bat`. This is only needed once: it installs everything and creates a **ClipTranslator** shortcut on your desktop.
+3. The app opens the **Settings** window, which checks your hardware, recommends the best models and downloads them.
 
-The first run installs the dependencies and opens a setup wizard that checks your hardware and recommends the best models. Models are downloaded on first use.
-
-To run the wizard again:
-
-```bash
-ClipTranslator.bat --setup
-```
+From then on, open the app from the desktop shortcut. To change models or the translation engine later, click **Settings…**. Run `ClipTranslator.bat` again after updating the app.
 
 ## Usage
 
-Drag a video onto `ClipTranslator.bat`, or use the command line:
+1. Drop a video or audio file into the window, or click **Open file…**.
+2. Choose the source language (or leave it on automatic detection) and the target language.
+3. Optionally add some context about the clip to improve the translation.
+4. Click **Generate subtitles**.
+5. Review the result: click a row to jump to that moment in the player, and edit any text directly in the table.
+6. Click **Export subtitles**.
+
+### Command line (optional)
 
 ```bash
 uv run python -m app.presentation.cli video.mp4 --to en

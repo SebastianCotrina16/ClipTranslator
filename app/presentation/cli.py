@@ -33,26 +33,26 @@ EXPECTED_ERRORS = (
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cliptranslator",
-        description="Transcribe un clip y genera subtítulos traducidos (.srt).",
+        description="Transcribe a clip and create translated subtitles (.srt).",
     )
-    parser.add_argument("media", type=Path, help="Video o audio")
-    parser.add_argument("-l", "--language", help="Idioma de origen (en, pt, ja...)")
-    parser.add_argument("-t", "--to", dest="target", help="Idioma de destino (es, en, pt...)")
-    parser.add_argument("-c", "--context", default="", help="Qué pasa en el clip")
-    parser.add_argument("--prompt", help="Nombres propios para Whisper")
-    parser.add_argument("-o", "--out-dir", type=Path, help="Carpeta de salida")
-    parser.add_argument("--vtt", action="store_true", help="Exportar también .vtt")
-    parser.add_argument("--burn", action="store_true", help="Quemar los subtítulos en el video")
-    parser.add_argument("--no-separation", action="store_true", help="No separar la voz")
+    parser.add_argument("media", type=Path, help="Video or audio file")
+    parser.add_argument("-l", "--language", help="Source language (en, pt, ja...)")
+    parser.add_argument("-t", "--to", dest="target", help="Target language (es, en, pt...)")
+    parser.add_argument("-c", "--context", default="", help="What happens in the clip")
+    parser.add_argument("--prompt", help="Names Whisper should spell correctly")
+    parser.add_argument("-o", "--out-dir", type=Path, help="Output folder")
+    parser.add_argument("--vtt", action="store_true", help="Also export .vtt")
+    parser.add_argument("--burn", action="store_true", help="Burn the subtitles into the video")
+    parser.add_argument("--no-separation", action="store_true", help="Skip voice isolation")
     parser.add_argument("--whisper-model", help="large-v3, large-v2, large-v3-turbo...")
-    parser.add_argument("--device", choices=["cuda", "cpu"], help="Dispositivo para Whisper")
+    parser.add_argument("--device", choices=["cuda", "cpu"], help="Device for Whisper")
     parser.add_argument("--compute-type", help="float16, int8_float16, int8...")
     parser.add_argument("--translator", choices=["ollama", "anthropic", "openai"])
-    parser.add_argument("--ollama-model", help="Modelo de Ollama")
+    parser.add_argument("--ollama-model", help="Ollama model")
     parser.add_argument(
-        "--force", action="append", choices=CACHEABLE_STAGES, default=[], help="Rehacer etapa"
+        "--force", action="append", choices=CACHEABLE_STAGES, default=[], help="Redo a cached stage"
     )
-    parser.add_argument("--config", type=Path, help="Archivo de configuración TOML")
+    parser.add_argument("--config", type=Path, help="TOML settings file")
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
 
@@ -84,8 +84,8 @@ def warn_if_gpu_busy() -> None:
     busy = sustained_utilization()
     if busy is not None and busy >= BUSY_GPU_PERCENT:
         print(
-            f"Aviso: la GPU ya está al {busy}% por otro programa (¿un juego?). Todo irá más "
-            "lento; si la separación de voz se atasca, se repetirá en la CPU."
+            f"Warning: the GPU is already at {busy}% because of another program (a game?). "
+            "Everything will be slower; if voice isolation stalls it is redone on the CPU."
         )
 
 
@@ -96,29 +96,29 @@ def process(pipeline: Pipeline, args: argparse.Namespace) -> list[Path]:
     else:
         detection = pipeline.detect_language()
         top = ", ".join(f"{code} {probability:.0%}" for code, probability in detection.top[:3])
-        print(f"Idioma detectado: {detection.language} ({top})")
+        print(f"Detected language: {detection.language} ({top})")
     pipeline.transcribe(args.prompt)
     pipeline.translate(args.context)
     pipeline.build_cues()
     files = pipeline.export(args.out_dir, vtt=args.vtt)
     if args.burn:
-        print("Quemando subtítulos en el video...")
-        burned = files[0].with_name(f"{files[0].stem.rsplit('.', 1)[0]}.subtitulado.mp4")
+        print("Burning subtitles into the video...")
+        burned = files[0].with_name(f"{files[0].stem.rsplit('.', 1)[0]}.subtitled.mp4")
         files.append(burn_subtitles(pipeline.state.media, files[0], burned))
     return files
 
 
 def print_summary(pipeline: Pipeline, files: list[Path]) -> None:
     for warning in pipeline.state.warnings:
-        print(f"Aviso: {warning}")
+        print(f"Warning: {warning}")
     for name, value in pipeline.state.backends.items():
         print(f"{name}: {value}")
     cues = pipeline.state.cues
     flagged = sum(1 for cue in cues if cue.flags)
-    print(f"{len(cues)} subtítulos ({flagged} marcados para revisar)")
+    print(f"{len(cues)} subtitles ({flagged} to review)")
     for path in files:
         print(f"  → {path}")
-    print(f"Carpeta de trabajo: {pipeline.state.work_dir}")
+    print(f"Work folder: {pipeline.state.work_dir}")
 
 
 def main(argv: list[str] | None = None) -> int:

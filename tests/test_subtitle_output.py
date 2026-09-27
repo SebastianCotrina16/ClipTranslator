@@ -18,7 +18,7 @@ def sample_cues() -> list[Cue]:
             "Este es el peor dibujo que he visto en mi vida",
             1,
         ),
-        Cue(3, 7.0, 8.0, "untranslated", "", 2, ["sin_traduccion"]),
+        Cue(3, 7.0, 8.0, "untranslated", "", 2, ["untranslated"]),
     ]
 
 
@@ -62,23 +62,23 @@ def test_transcript_merges_cues_of_the_same_sentence() -> None:
     cues = [
         Cue(1, 190.0, 195.0, "Hi, my name", "Hola, me llamo", 0),
         Cue(2, 195.1, 210.0, "is Juan", "Juan", 0),
-        Cue(3, 211.0, 212.0, "ok", "", 1, ["sin_traduccion"]),
+        Cue(3, 211.0, 212.0, "ok", "", 1, ["untranslated"]),
     ]
     text = to_transcript(cues, "en")
     assert "[3:10 - 3:30]\n  EN: Hi, my name is Juan\n  ES: Hola, me llamo Juan" in text
-    assert "ES: (sin traducción)" in text
-    assert "revisar: sin_traduccion" in text
+    assert "ES: (not translated)" in text
+    assert "check: untranslated" in text
 
 
-def test_transcript_uses_english_labels_for_other_targets() -> None:
+def test_transcript_for_english_target() -> None:
     cues = [
         Cue(1, 190.0, 210.0, "Oi, meu nome é Juan", "Hi, my name is Juan", 0),
-        Cue(2, 211.0, 212.0, "ok", "", 1, ["sin_traduccion"]),
+        Cue(2, 211.0, 212.0, "ok", "", 1, ["untranslated"]),
     ]
     text = to_transcript(cues, "pt", "en")
     assert "[3:10 - 3:30]\n  PT: Oi, meu nome é Juan\n  EN: Hi, my name is Juan" in text
     assert "EN: (not translated)" in text
-    assert "check: sin_traduccion" in text
+    assert "check: untranslated" in text
 
 
 def test_writer_names_files_for_spanish_target(tmp_path: Path) -> None:
@@ -86,8 +86,8 @@ def test_writer_names_files_for_spanish_target(tmp_path: Path) -> None:
     assert [f.name for f in files] == [
         "clip.es.srt",
         "clip.en.srt",
-        "clip.bilingue.srt",
-        "clip.transcripcion.txt",
+        "clip.bilingual.srt",
+        "clip.transcript.txt",
     ]
     assert files[0].read_bytes().startswith(b"\xef\xbb\xbf")
 
@@ -104,7 +104,7 @@ def test_writer_names_files_for_english_target(tmp_path: Path) -> None:
 
 def test_writer_same_language_writes_only_target_and_transcript(tmp_path: Path) -> None:
     files = SubtitleFileWriter().write(sample_cues(), tmp_path / "clip.mp4", "es", "es")
-    assert [f.name for f in files] == ["clip.es.srt", "clip.transcripcion.txt"]
+    assert [f.name for f in files] == ["clip.es.srt", "clip.transcript.txt"]
 
 
 def test_safe_stem_removes_path_and_reserved_characters() -> None:

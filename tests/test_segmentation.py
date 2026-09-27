@@ -40,11 +40,11 @@ def test_long_unit_split_near_middle_preferring_commas() -> None:
 def test_flagged_segment_gets_its_own_units() -> None:
     clean = make_segment("hello there")
     flagged = make_segment("thanks for watching", start=clean.end + 0.05, segment_id=1)
-    flagged.flags = ["frase_tipica"]
+    flagged.flags = ["known_phrase"]
     units = build([clean, flagged])
     assert [unit.text for unit in units] == ["hello there", "thanks for watching"]
     assert units[0].flags == []
-    assert units[1].flags == ["frase_tipica"]
+    assert units[1].flags == ["known_phrase"]
 
 
 def test_unit_times_come_from_words() -> None:

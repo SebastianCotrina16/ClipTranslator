@@ -47,7 +47,7 @@ def model_spec(name: str) -> MdxModel:
     try:
         return KNOWN_MODELS[name]
     except KeyError:
-        raise ValueError(f"Modelo de separación desconocido: {name}") from None
+        raise ValueError(f"Unknown separation model: {name}") from None
 
 
 def model_file(name: str, models_dir: Path) -> Path:
@@ -88,10 +88,12 @@ def download_model(
         _stream_to_file(spec.url, partial, progress)
     except httpx.HTTPError as error:
         partial.unlink(missing_ok=True)
-        raise ModelDownloadError(f"No se pudo descargar el modelo {name}: {error}") from error
+        raise ModelDownloadError(f"Could not download the {name} model: {error}") from error
     if _sha256(partial) != spec.sha256:
         partial.unlink(missing_ok=True)
-        raise ModelDownloadError(f"El modelo {name} descargado no es el esperado (SHA-256).")
+        raise ModelDownloadError(
+            f"The downloaded {name} model does not match the expected SHA-256."
+        )
     partial.replace(target)
     return target
 

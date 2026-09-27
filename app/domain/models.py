@@ -6,14 +6,14 @@ from typing import Any
 
 
 class Flag(StrEnum):
-    EMPTY = "vacio"
-    NO_SPEECH = "sin_voz"
-    LOW_CONFIDENCE = "baja_confianza"
-    REPETITIVE = "repetitivo"
-    KNOWN_PHRASE = "frase_tipica"
-    CORRECTED = "corregido"
-    UNTRANSLATED = "sin_traduccion"
-    FAST_READING = "lectura_rapida"
+    EMPTY = "empty"
+    NO_SPEECH = "no_speech"
+    LOW_CONFIDENCE = "low_confidence"
+    REPETITIVE = "repetitive"
+    KNOWN_PHRASE = "known_phrase"
+    CORRECTED = "corrected"
+    UNTRANSLATED = "untranslated"
+    FAST_READING = "fast_reading"
 
 
 @dataclass

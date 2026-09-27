@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 from functools import cache
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+
+from app.infrastructure.process import run_hidden
 
 SPEECH_SAMPLE_RATE = 16_000
 SEPARATION_SAMPLE_RATE = 44_100
@@ -25,17 +26,15 @@ def ffmpeg_executable() -> str:
     except (ImportError, RuntimeError):
         executable = shutil.which("ffmpeg")
         if executable is None:
-            raise FfmpegError("No se encontró ffmpeg.") from None
+            raise FfmpegError("ffmpeg was not found.") from None
         return executable
 
 
 def run_ffmpeg(arguments: list[str]) -> None:
     command = [ffmpeg_executable(), "-hide_banner", "-loglevel", "error", "-y", *arguments]
-    result = subprocess.run(
-        command, capture_output=True, text=True, encoding="utf-8", errors="replace"
-    )
+    result = run_hidden(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if result.returncode != 0:
-        raise FfmpegError(f"ffmpeg falló: {result.stderr.strip()}")
+        raise FfmpegError(f"ffmpeg failed: {result.stderr.strip()}")
 
 
 class FfmpegAudio:

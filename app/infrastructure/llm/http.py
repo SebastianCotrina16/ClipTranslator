@@ -15,9 +15,9 @@ ERROR_BODY_PREVIEW = 300
 def validated_base_url(url: str, require_tls_for_remote: bool) -> str:
     parsed = urlparse(url.strip())
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise LanguageModelError(f"URL no válida: {url!r}")
+        raise LanguageModelError(f"Invalid URL: {url!r}")
     if require_tls_for_remote and parsed.scheme != "https" and not is_loopback(parsed.hostname):
-        raise LanguageModelError("Por seguridad, las APIs remotas deben usar https.")
+        raise LanguageModelError("For security, remote APIs must use https.")
     return url.strip().rstrip("/")
 
 
@@ -32,9 +32,9 @@ def parse_json_object(text: str) -> dict[str, Any]:
     try:
         data = json.loads(content)
     except json.JSONDecodeError as error:
-        raise LanguageModelError(f"Respuesta no es JSON válido: {error}") from error
+        raise LanguageModelError(f"Response is not valid JSON: {error}") from error
     if not isinstance(data, dict):
-        raise LanguageModelError("La respuesta no es un objeto JSON.")
+        raise LanguageModelError("The response is not a JSON object.")
     return data
 
 
@@ -50,4 +50,4 @@ def post_json(client: httpx.Client, url: str, payload: dict[str, Any], service: 
     try:
         return response.json()
     except ValueError as error:
-        raise LanguageModelError(f"{service}: respuesta ilegible") from error
+        raise LanguageModelError(f"{service}: unreadable response") from error

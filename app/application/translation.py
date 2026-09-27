@@ -255,12 +255,12 @@ class TranslationService:
             response = self._model.complete(system_prompt, message, RESPONSE_SCHEMAS[request.task])
         except LanguageModelError as error:
             report.errors.append(str(error))
-            log.warning("Falló una petición al modelo: %s", error)
+            log.warning("Model request failed: %s", error)
             return {}
         validated = validate_response([item["id"] for item in items], response)
         if validated.missing or validated.unexpected:
             log.info(
-                "Respuesta incompleta: %d ids faltan, %d sobran",
+                "Incomplete response: %d ids missing, %d unexpected",
                 len(validated.missing),
                 len(validated.unexpected),
             )

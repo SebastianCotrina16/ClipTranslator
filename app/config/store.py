@@ -30,6 +30,10 @@ def models_dir() -> Path:
     return data_dir() / "models"
 
 
+def whisper_models_dir() -> Path:
+    return models_dir() / "whisper"
+
+
 class SettingsStore:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or config_path()
@@ -41,7 +45,7 @@ class SettingsStore:
         try:
             raw = tomllib.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, tomllib.TOMLDecodeError) as error:
-            log.warning("Configuración ilegible (%s); se usan los valores por defecto.", error)
+            log.warning("Unreadable settings (%s); using defaults.", error)
             return settings
         for name in SECTION_NAMES:
             if isinstance(raw.get(name), dict):
@@ -67,7 +71,7 @@ def _merge_typed(section: Any, raw: dict[str, Any], section_name: str) -> None:
         if expected is float and isinstance(value, int) and not isinstance(value, bool):
             value = float(value)
         if not isinstance(value, expected) or (expected is int and isinstance(value, bool)):
-            log.warning("Se ignora %s.%s: se esperaba %s.", section_name, key, expected.__name__)
+            log.warning("Ignoring %s.%s: expected %s.", section_name, key, expected.__name__)
             continue
         setattr(section, key, value)
 
@@ -78,7 +82,7 @@ def _validate_language(settings: Settings) -> None:
             settings.translation.target_language
         )
     except InvalidLanguageCodeError as error:
-        log.warning("%s Se usa español.", error)
+        log.warning("%s Using Spanish.", error)
         settings.translation.target_language = "es"
 
 
@@ -88,4 +92,4 @@ def _restrict_to_owner(path: Path) -> None:
     try:
         path.chmod(0o600)
     except OSError:
-        log.warning("No se pudieron restringir los permisos de %s.", path)
+        log.warning("Could not restrict the permissions of %s.", path)

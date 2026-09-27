@@ -80,3 +80,13 @@ def test_cloud_models_require_a_model_name() -> None:
         AnthropicModel("", "key")
     with pytest.raises(LanguageModelError):
         OpenAICompatibleModel("  ", "key", "https://api.example.com/v1")
+
+
+def test_gui_progress_and_time_helpers() -> None:
+    from app.presentation.gui.cue_table import short_time
+    from app.presentation.gui.job import overall_progress
+
+    assert overall_progress("audio", 0.0) == 0.0
+    assert overall_progress("cues", 1.0) == 1.0
+    assert overall_progress("translate", 0.5) == (6 + 0.5) / 8
+    assert short_time(68.456) == "1:08.46"

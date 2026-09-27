@@ -20,4 +20,4 @@ def create_language_model(settings: TranslationSettings, cpu_threads: int = 0) -
             settings.ollama_url,
             cpu_threads=cpu_threads or None,
         )
-    raise LanguageModelError(f"Backend de traducción desconocido: {settings.backend!r}")
+    raise LanguageModelError(f"Unknown translation backend: {settings.backend!r}")
