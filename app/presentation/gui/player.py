@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from app.domain.models import Cue
 from app.presentation.gui.cue_table import short_time
+from app.presentation.gui.icons import icon
 
 DEFAULT_FRAME = QSizeF(1280, 720)
 CAPTION_WIDTH_RATIO = 0.9
@@ -43,7 +44,7 @@ class SubtitledPlayer(QWidget):
         self._view = QGraphicsView(self._scene)
         self._player = QMediaPlayer(self)
         self._audio = QAudioOutput(self)
-        self._play_button = QPushButton("Play")
+        self._play_button = QPushButton(icon("play"), "")
         self._slider = QSlider(Qt.Orientation.Horizontal)
         self._time = QLabel(short_time(0))
         self._build()
@@ -82,7 +83,7 @@ class SubtitledPlayer(QWidget):
         self._view.setRenderHint(QPainter.RenderHint.Antialiasing)
         self._view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._view.setStyleSheet("border: 0; background: black;")
+        self._view.setStyleSheet("border: 0; background: #07040f; border-radius: 12px;")
         self._player.setAudioOutput(self._audio)
         self._player.setVideoOutput(self._video)
         self._video.nativeSizeChanged.connect(lambda _: self._fit_frame())
@@ -91,7 +92,11 @@ class SubtitledPlayer(QWidget):
         self._player.playbackStateChanged.connect(self._on_state)
         self._slider.sliderMoved.connect(self._player.setPosition)
         self._play_button.clicked.connect(self._toggle_playback)
+        self._play_button.setFixedSize(40, 36)
+        self._play_button.setCursor(Qt.CursorShape.PointingHandCursor)
         controls = QHBoxLayout()
+        controls.setContentsMargins(0, 10, 0, 0)
+        controls.setSpacing(12)
         controls.addWidget(self._play_button)
         controls.addWidget(self._slider, stretch=1)
         controls.addWidget(self._time)
@@ -109,7 +114,7 @@ class SubtitledPlayer(QWidget):
 
     def _on_state(self, state: QMediaPlayer.PlaybackState) -> None:
         playing = state == QMediaPlayer.PlaybackState.PlayingState
-        self._play_button.setText("Pause" if playing else "Play")
+        self._play_button.setIcon(icon("pause" if playing else "play"))
 
     def _on_position(self, milliseconds: int) -> None:
         self._slider.blockSignals(True)

@@ -388,6 +388,37 @@ class Pipeline:
             self.cache.invalidate(Stage.TRANSLATION)
         return units
 
+    def retranslate_cue(self, position: int, clip_context: str = "", neighbours: int = 4) -> str:
+        cues = self.state.cues
+        if not 0 <= position < len(cues):
+            raise PipelineError("That subtitle does not exist.")
+        target = cues[position]
+        language = self.state.language or "und"
+        translation = self.settings.translation
+        model = self.services.create_language_model()
+        try:
+            for warning in model.prepare():
+                self._warn(warning)
+            low, high = max(position - neighbours, 0), min(position + neighbours + 1, len(cues))
+            surrounding = [
+                {"id": cue.index, "text": cue.original, "translation": cue.translation}
+                for cue in cues[low:high]
+                if cue is not target
+            ]
+            request = Request(Task.TRANSLATE, language, translation.target_language, clip_context)
+            text = TranslationService(model).translate_one(
+                {"id": target.index, "text": target.original},
+                request,
+                translation.effective_system_prompt(),
+                surrounding,
+            )
+        finally:
+            model.unload()
+        if text is None:
+            raise LanguageModelError("The model did not return a translation for that line.")
+        target.translation = text
+        return text
+
     def build_cues(self) -> list[Cue]:
         if Stage.TRANSLATION not in self.state.keys:
             self.translate()

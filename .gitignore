@@ -12,3 +12,5 @@ eval/
 
 config.toml
 ClipTranslator.lnk
+build/
+dist/

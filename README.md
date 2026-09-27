@@ -19,11 +19,15 @@ App for detecting and translating languages in video and audio clips. It transcr
 
 ## Installation
 
-1. Download or clone this repository.
-2. Double-click `ClipTranslator.bat`. This is only needed once: it installs everything and creates a **ClipTranslator** shortcut on your desktop.
-3. The app opens the **Settings** window, which checks your hardware, recommends the best models and downloads them.
+1. Download `ClipTranslator-Setup.exe` from the [latest release](https://github.com/SebastianCotrina16/ClipTranslator/releases/latest).
+2. Run it. It needs no administrator rights and downloads the components that fit your computer (this can take several minutes).
+3. When the app opens, the **Settings** window checks your hardware, recommends the best models and downloads them.
 
-From then on, open the app from the desktop shortcut. To change models or the translation engine later, click **Settings…**. Run `ClipTranslator.bat` again after updating the app.
+Open the app from the Start menu or the desktop shortcut. To change models or the translation engine later, click **Settings**. Uninstall it from Windows Settings like any other app.
+
+### From the source code
+
+Clone the repository and double-click `ClipTranslator.bat`. It installs everything and creates a desktop shortcut.
 
 ## Usage
 

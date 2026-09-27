@@ -241,6 +241,20 @@ class TranslationService:
                     break
             _notify(progress, len(result), len(order))
 
+    def translate_one(
+        self,
+        item: dict[str, Any],
+        request: Request,
+        system_prompt: str,
+        surrounding: list[dict[str, Any]],
+    ) -> str | None:
+        report = TranslationReport()
+        for _ in range(1 + self._retries):
+            result = self._ask([item], request, system_prompt, surrounding, report)
+            if item["id"] in result:
+                return result[item["id"]]
+        return None
+
     def _ask(
         self,
         items: list[dict[str, Any]],

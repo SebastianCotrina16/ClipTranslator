@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      UV_VERSION: "0.12.19"
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download uv for the installer
+        shell: pwsh
+        run: |
+          $asset = "uv-x86_64-pc-windows-msvc.zip"
+          $base = "https://github.com/astral-sh/uv/releases/download/$env:UV_VERSION"
+          New-Item -ItemType Directory -Force build | Out-Null
+          Invoke-WebRequest "$base/$asset" -OutFile "build/$asset"
+          Invoke-WebRequest "$base/$asset.sha256" -OutFile "build/$asset.sha256"
+          $expected = (Get-Content "build/$asset.sha256").Trim().Split(" ")[0].ToLower()
+          $actual = (Get-FileHash "build/$asset" -Algorithm SHA256).Hash.ToLower()
+          if ($expected -ne $actual) { throw "uv checksum mismatch" }
+          Expand-Archive "build/$asset" -DestinationPath build/uv-files
+          $uv = Get-ChildItem build/uv-files -Recurse -Filter uv.exe | Select-Object -First 1
+          Copy-Item $uv.FullName build/uv.exe
+
+      - name: Install dependencies
+        run: build/uv.exe sync --frozen --extra cpu
+
+      - name: Test
+        run: build/uv.exe run --no-sync pytest -q
+
+      - name: Create the app icon
+        run: build/uv.exe run --no-sync python -m app.presentation.gui.export_icon build/icon.ico
+
+      - name: Work out the version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          } else {
+            $version = "0.0.0-dev.$env:GITHUB_RUN_NUMBER"
+          }
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" | Select-Object -First 1
+          & $iscc.FullName "/DAppVersion=$env:APP_VERSION" installer/ClipTranslator.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClipTranslator-Setup
+          path: dist/*.exe
+
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
+          generate_release_notes: true

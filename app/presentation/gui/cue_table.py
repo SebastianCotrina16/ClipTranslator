@@ -50,6 +50,9 @@ class CueTableModel(QAbstractTableModel):
         self._cues = cues
         self.endResetModel()
 
+    def refresh_row(self, row: int) -> None:
+        self.dataChanged.emit(self.index(row, 0), self.index(row, len(Column) - 1))
+
     def cue_at(self, row: int) -> Cue | None:
         return self._cues[row] if 0 <= row < len(self._cues) else None
 

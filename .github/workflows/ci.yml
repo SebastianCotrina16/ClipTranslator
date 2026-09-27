@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra cpu
+
+      - name: Lint
+        run: uv run --no-sync ruff check app tests
+
+      - name: Check formatting
+        run: uv run --no-sync ruff format --check app tests
+
+      - name: Test
+        run: uv run --no-sync pytest -q
