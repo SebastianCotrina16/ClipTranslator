@@ -36,6 +36,7 @@ Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "install.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\build\uv.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\build\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\build\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{#AppExe}"; WorkingDir: "{app}"; IconFilename: "{app}\icon.ico"
@@ -50,6 +51,35 @@ Type: filesandordirs; Name: "{app}\python"
 Type: files; Name: "{app}\install.log"
 
 [Code]
+const
+  RuntimeKey = 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64';
+  MinimumRuntimeMinor = 40;
+  RebootRequired = 3010;
+  NewerRuntimeInstalled = 1638;
+
+function VisualCppRuntimeReady(): Boolean;
+var
+  Installed, Major, Minor: Cardinal;
+begin
+  Result := RegQueryDWordValue(HKLM64, RuntimeKey, 'Installed', Installed)
+    and RegQueryDWordValue(HKLM64, RuntimeKey, 'Major', Major)
+    and RegQueryDWordValue(HKLM64, RuntimeKey, 'Minor', Minor)
+    and (Installed = 1)
+    and ((Major > 14) or ((Major = 14) and (Minor >= MinimumRuntimeMinor)));
+end;
+
+procedure InstallVisualCppRuntime();
+var
+  ResultCode: Integer;
+begin
+  if VisualCppRuntimeReady() then
+    Exit;
+  WizardForm.StatusLabel.Caption := 'Installing the Microsoft Visual C++ runtime...';
+  if not ShellExec('runas', ExpandConstant('{tmp}\vc_redist.x64.exe'), '/install /quiet /norestart', '', SW_SHOW, ewWaitUntilTerminated, ResultCode)
+    or not ((ResultCode = 0) or (ResultCode = RebootRequired) or (ResultCode = NewerRuntimeInstalled)) then
+    MsgBox('The Microsoft Visual C++ runtime could not be installed. Transcription may not work until it is installed from microsoft.com (search "Visual C++ Redistributable x64").', mbError, MB_OK);
+end;
+
 procedure InstallComponents();
 var
   ResultCode: Integer;
@@ -67,5 +97,8 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
+  begin
+    InstallVisualCppRuntime();
     InstallComponents();
+  end;
 end;

@@ -10,7 +10,7 @@ from pathlib import Path
 import httpx
 
 from app.application.setup_advisor import SystemReport
-from app.infrastructure.gpu import cuda_available, detect_gpu, expose_cuda_libraries
+from app.infrastructure.gpu import cuda_available, detect_gpu, expose_cuda_libraries, free_vram_mb
 from app.infrastructure.whisper import vad_model_path
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
@@ -107,4 +107,10 @@ def scan(data_dir: Path, ollama_url: str = DEFAULT_OLLAMA_URL) -> SystemReport:
         ollama_installed=installed is not None or ollama_executable() is not None,
         ollama_running=installed is not None,
         ollama_models=installed or [],
+        vram_free_gb=_free_vram_gb() if gpu is not None else None,
     )
+
+
+def _free_vram_gb() -> float | None:
+    free = free_vram_mb()
+    return free / 1024 if free is not None else None

@@ -13,9 +13,11 @@ App for detecting and translating languages in video and audio clips. It transcr
 
 ## Requirements
 
-- Windows 10 or 11.
+- Windows 10 or 11 (64-bit) and an internet connection during setup.
 - NVIDIA GPU recommended (driver 527.41 or newer). Works on CPU, but slower.
-- [Ollama](https://ollama.com/download) for local translation, or an API key.
+- [Ollama](https://ollama.com/download) for local translation, or an API key. The Settings window offers to install Ollama.
+
+The installer adds everything else, including Python, the Microsoft Visual C++ runtime (only if missing) and the GPU libraries. Because it is not digitally signed, Windows may show a SmartScreen warning: click **More info** and then **Run anyway**.
 
 ## Installation
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from PySide6.QtCore import QObject, QThread, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -114,9 +114,13 @@ class SetupDialog(QDialog):
         self._thread: QThread | None = None
         self._task: QObject | None = None
         self._hardware = QLabel("Checking your computer…")
+        self._profile = QLabel()
         self._warnings = QLabel()
         self._whisper = QComboBox()
         self._isolation = QCheckBox("Remove music and background noise before transcribing")
+        self._low_impact = QCheckBox(
+            "Keep the computer responsive while working (uses fewer CPU cores)"
+        )
         self._target = QComboBox()
         self._engine = QComboBox()
         self._api_model = QLineEdit()
@@ -143,6 +147,9 @@ class SetupDialog(QDialog):
         self.setWindowTitle("ClipTranslator settings")
         self.setMinimumWidth(640)
         self._hardware.setWordWrap(True)
+        self._hardware.setObjectName("muted")
+        self._profile.setWordWrap(True)
+        self._profile.setTextFormat(Qt.TextFormat.RichText)
         self._warnings.setWordWrap(True)
         self._warnings.setStyleSheet("color: #b8860b;")
         self._api_key.setEchoMode(QLineEdit.EchoMode.Password)
@@ -161,6 +168,7 @@ class SetupDialog(QDialog):
         form = QFormLayout()
         form.addRow("Transcription", self._whisper)
         form.addRow("", self._isolation)
+        form.addRow("", self._low_impact)
         form.addRow("Translate to", self._target)
         form.addRow("Translation engine", self._engine)
         form.addRow("API model", self._api_model)
@@ -168,6 +176,7 @@ class SetupDialog(QDialog):
         form.addRow("API address", self._api_url)
         self._form = form
         layout = QVBoxLayout(self)
+        layout.addWidget(self._profile)
         layout.addWidget(self._hardware)
         layout.addWidget(self._warnings)
         layout.addLayout(form)
@@ -184,6 +193,7 @@ class SetupDialog(QDialog):
     def _on_scanned(self, report: SystemReport, recommendation: Recommendation) -> None:
         self._report = report
         self._recommendation = recommendation
+        self._profile.setText(f"<b>{recommendation.tier}</b><br>{recommendation.summary}")
         self._hardware.setText(self._describe(report))
         self._warnings.setText("\n".join(recommendation.warnings))
         for option in WHISPER_MODELS:
@@ -202,6 +212,9 @@ class SetupDialog(QDialog):
             self._engine.addItem(label, backend)
         self._engine.setCurrentIndex(self._engine.findData(recommendation.translation_model))
         self._isolation.setChecked(recommendation.separation)
+        self._low_impact.setChecked(
+            self._settings.performance.low_impact and recommendation.low_impact
+        )
         self._status.setText("")
         self._set_editable(True)
         self._refresh()
@@ -225,6 +238,7 @@ class SetupDialog(QDialog):
         plan = plan_from(self._recommendation, self._target.currentData())
         plan.whisper_model = self._whisper.currentData() or plan.whisper_model
         plan.voice_isolation = self._isolation.isChecked()
+        plan.low_impact = self._low_impact.isChecked()
         engine = self._engine.currentData()
         if engine in API_ENGINES:
             plan.backend = engine
@@ -311,6 +325,7 @@ class SetupDialog(QDialog):
         for widget in (
             self._whisper,
             self._isolation,
+            self._low_impact,
             self._target,
             self._engine,
             self._api_model,

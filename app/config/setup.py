@@ -9,6 +9,7 @@ def apply_plan(settings: Settings, plan: SetupPlan) -> Settings:
     settings.transcription.device = plan.device
     settings.transcription.compute_type = plan.compute_type
     settings.separation.enabled = plan.voice_isolation
+    settings.performance.low_impact = plan.low_impact
     settings.translation.target_language = plan.target_language
     settings.translation.backend = plan.backend
     if plan.backend == "ollama":
