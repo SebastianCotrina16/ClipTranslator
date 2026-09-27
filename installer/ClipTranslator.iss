@@ -19,6 +19,7 @@ OutputBaseFilename=ClipTranslator-Setup-{#AppVersion}
 SetupIconFile=..\build\icon.ico
 UninstallDisplayIcon={app}\icon.ico
 UninstallDisplayName={#AppName}
+LicenseFile=..\LICENSE
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -33,6 +34,8 @@ Source: "..\app\*"; DestDir: "{app}\app"; Excludes: "__pycache__,*.pyc"; Flags: 
 Source: "..\pyproject.toml"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\uv.lock"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "install.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\build\uv.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\build\icon.ico"; DestDir: "{app}"; Flags: ignoreversion

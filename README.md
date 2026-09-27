@@ -68,3 +68,7 @@ Next to the video:
 - `video.<source>.srt`: original subtitles.
 - `video.bilingual.srt`: both languages.
 - `video.transcript.txt`: easy-to-read transcript with timestamps.
+
+## License
+
+ClipTranslator is released under the [MIT License](LICENSE). It uses third-party models and libraries under their own licenses, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

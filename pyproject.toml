@@ -2,6 +2,8 @@
 name = "cliptranslator"
 version = "1.1.0"
 description = "App for detecting and translating languages in video and audio clips"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "faster-whisper==1.2.1",
