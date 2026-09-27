@@ -69,6 +69,12 @@ Next to the video:
 - `video.bilingual.srt`: both languages.
 - `video.transcript.txt`: easy-to-read transcript with timestamps.
 
+## Support
+
+If ClipTranslator saves you time, you can support its development:
+
+<a href="https://buymeacoffee.com/sebastiancotrina16"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="42"></a>
+
 ## License
 
 ClipTranslator is released under the [MIT License](LICENSE). It uses third-party models and libraries under their own licenses, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
