@@ -8,9 +8,13 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Signal, Slot
 
 from app.application.pipeline import Pipeline, Stage
+from app.application.updates import newer_release
 from app.bootstrap import create_pipeline
 from app.config.settings import Settings
+from app.infrastructure.ffmpeg import burn_subtitles
+from app.infrastructure.github_releases import GitHubReleases, installed_version
 from app.infrastructure.gpu import sustained_utilization
+from app.infrastructure.subtitle_files import safe_stem
 
 log = logging.getLogger(__name__)
 
@@ -136,3 +140,49 @@ class RetranslateJob(QObject):
             self.failed.emit(str(error))
             return
         self.succeeded.emit(self._position, text)
+
+
+class ExportVideoJob(QObject):
+    progressed = Signal(float)
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, pipeline: Pipeline) -> None:
+        super().__init__()
+        self._pipeline = pipeline
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            files = self._pipeline.export()
+            subtitles = files[0]
+            output = subtitles.with_name(
+                f"{safe_stem(self._pipeline.state.media.stem)}.subtitled.mp4"
+            )
+            burn_subtitles(
+                self._pipeline.state.media,
+                subtitles,
+                output,
+                self._pipeline.state.duration,
+                self.progressed.emit,
+            )
+        except Exception as error:
+            log.exception("Exporting the subtitled video failed")
+            self.failed.emit(str(error))
+            return
+        self.succeeded.emit(output)
+
+
+class UpdateCheckJob(QObject):
+    found = Signal(object)
+    finished = Signal()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            release = newer_release(installed_version(), GitHubReleases())
+            if release is not None:
+                self.found.emit(release)
+        except Exception:
+            log.exception("Update check failed")
+        self.finished.emit()

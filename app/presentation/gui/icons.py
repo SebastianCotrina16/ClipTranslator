@@ -47,6 +47,12 @@ _STROKE_ICONS = {
     "chevron": '<path d="M6 9l6 6 6-6"/>',
     "undo": '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>',
     "check": '<path d="M5 12l5 5 9-10"/>',
+    "redo": '<path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/>',
+    "earlier": '<path d="M11 17l-5-5 5-5"/><path d="M18 17l-5-5 5-5"/>',
+    "later": '<path d="M13 17l5-5-5-5"/><path d="M6 17l5-5-5-5"/>',
+    "video": '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/>',
+    "plus": '<path d="M12 5v14M5 12h14"/>',
+    "queue": '<path d="M4 6h16M4 12h16M4 18h10"/>',
 }
 
 

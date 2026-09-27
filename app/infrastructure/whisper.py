@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import io
 import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -164,11 +165,58 @@ def is_model_downloaded(model: str, models_dir: Path) -> bool:
     return True
 
 
-def download_whisper_model(model: str, models_dir: Path) -> None:
-    quiet_model_downloads()
-    from faster_whisper.utils import download_model
+WHISPER_FILES = (
+    "config.json",
+    "preprocessor_config.json",
+    "model.bin",
+    "tokenizer.json",
+    "vocabulary.*",
+)
+MAX_REPORTED_FRACTION = 0.99
 
-    download_model(model, cache_dir=str(models_dir))
+
+def download_whisper_model(
+    model: str, models_dir: Path, progress: FractionCallback | None = None
+) -> None:
+    quiet_model_downloads()
+    if progress is None:
+        from faster_whisper.utils import download_model
+
+        download_model(model, cache_dir=str(models_dir))
+        return
+    from huggingface_hub import snapshot_download
+
+    snapshot_download(
+        _repository_for(model),
+        cache_dir=str(models_dir),
+        allow_patterns=list(WHISPER_FILES),
+        tqdm_class=_reporting_progress_bar(progress),
+    )
+    progress(1.0)
+
+
+def _repository_for(model: str) -> str:
+    from faster_whisper.utils import _MODELS
+
+    return _MODELS.get(model, model)
+
+
+def _reporting_progress_bar(progress: FractionCallback) -> type:
+    from tqdm.auto import tqdm
+
+    class ReportingProgressBar(tqdm):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            kwargs.pop("name", None)
+            kwargs["file"] = io.StringIO()
+            super().__init__(*args, **kwargs)
+
+        def update(self, n: float | None = 1) -> bool | None:
+            shown = super().update(n)
+            if self.unit == "B" and self.total:
+                progress(min(self.n / self.total, MAX_REPORTED_FRACTION))
+            return shown
+
+    return ReportingProgressBar
 
 
 def vad_model_path() -> Path | None:

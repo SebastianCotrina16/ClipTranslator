@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
+import tempfile
+from collections.abc import Callable
 from functools import cache
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
 
-from app.infrastructure.process import run_hidden
+from app.infrastructure.process import HIDDEN_WINDOW, run_hidden
 
 SPEECH_SAMPLE_RATE = 16_000
 SEPARATION_SAMPLE_RATE = 44_100
@@ -86,23 +89,71 @@ class FfmpegAudio:
         return info.frames / info.samplerate
 
 
-def burn_subtitles(media: Path, subtitles: Path, output: Path) -> Path:
+BURNED_SUBTITLE_STYLE = "FontName=Segoe UI,FontSize=20,Bold=1,Outline=2,Shadow=0,MarginV=28"
+AUDIO_ONLY_SUFFIXES = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".opus"}
+PROGRESS_KEYS = ("out_time_us=", "out_time_ms=")
+
+
+def has_video(media: Path) -> bool:
+    return media.suffix.lower() not in AUDIO_ONLY_SUFFIXES
+
+
+def burn_subtitles(
+    media: Path,
+    subtitles: Path,
+    output: Path,
+    duration: float | None = None,
+    progress: Callable[[float], None] | None = None,
+) -> Path:
     escaped = subtitles.resolve().as_posix().replace(":", r"\:").replace("'", r"\'")
-    run_ffmpeg(
-        [
-            "-i",
-            str(media),
-            "-vf",
-            f"subtitles='{escaped}'",
-            "-c:v",
-            "libx264",
-            "-crf",
-            "18",
-            "-preset",
-            "medium",
-            "-c:a",
-            "copy",
-            str(output),
-        ]
-    )
+    command = [
+        ffmpeg_executable(),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(media),
+        "-vf",
+        f"subtitles='{escaped}':force_style='{BURNED_SUBTITLE_STYLE}'",
+        "-c:v",
+        "libx264",
+        "-crf",
+        "18",
+        "-preset",
+        "medium",
+        "-c:a",
+        "copy",
+        "-progress",
+        "pipe:1",
+        "-nostats",
+        str(output),
+    ]
+    with tempfile.TemporaryFile() as errors:
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=errors, text=True, creationflags=HIDDEN_WINDOW
+        )
+        output_stream = process.stdout
+        if output_stream is not None:
+            for line in output_stream:
+                seconds = _progress_seconds(line)
+                if seconds is not None and progress and duration:
+                    progress(min(seconds / duration, 1.0))
+        process.wait()
+        if process.returncode != 0:
+            errors.seek(0)
+            detail = errors.read().decode("utf-8", "replace").strip()
+            raise FfmpegError(f"ffmpeg failed: {detail[-500:]}")
+    if progress:
+        progress(1.0)
     return output
+
+
+def _progress_seconds(line: str) -> float | None:
+    for key in PROGRESS_KEYS:
+        if line.startswith(key):
+            try:
+                return int(line[len(key) :].strip()) / 1_000_000
+            except ValueError:
+                return None
+    return None

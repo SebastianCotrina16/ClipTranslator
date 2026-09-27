@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDropEvent, QMouseEvent
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
@@ -54,64 +51,6 @@ def icon_button(text: str, icon_name: str, object_name: str = "") -> QPushButton
     return button
 
 
-class DropZone(QFrame):
-    file_dropped = Signal(Path)
-    browse_requested = Signal()
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.setObjectName("dropZone")
-        self.setAcceptDrops(True)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(150)
-        self._icon = QLabel()
-        self._icon.setPixmap(icon("upload", "#c4b5fd").pixmap(34, 34))
-        self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._title = QLabel("Drop a video or audio file")
-        self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._title.setStyleSheet("font-weight: 700; font-size: 11pt;")
-        self._hint = QLabel("or click to browse")
-        self._hint.setObjectName("muted")
-        self._hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._hint.setWordWrap(True)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 18, 16, 18)
-        layout.addStretch(1)
-        layout.addWidget(self._icon)
-        layout.addWidget(self._title)
-        layout.addWidget(self._hint)
-        layout.addStretch(1)
-
-    def show_file(self, media: Path) -> None:
-        self._icon.setPixmap(icon("film", "#c4b5fd").pixmap(34, 34))
-        self._title.setText(media.name)
-        self._hint.setText("Click or drop another file to replace it")
-
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.browse_requested.emit()
-
-    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-            self._set_active(True)
-
-    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
-        self._set_active(False)
-
-    def dropEvent(self, event: QDropEvent) -> None:
-        self._set_active(False)
-        for url in event.mimeData().urls():
-            if url.isLocalFile():
-                self.file_dropped.emit(Path(url.toLocalFile()))
-                return
-
-    def _set_active(self, active: bool) -> None:
-        self.setProperty("active", "true" if active else "false")
-        self.style().unpolish(self)
-        self.style().polish(self)
-
-
 class NoticeBox(QFrame):
     def __init__(self) -> None:
         super().__init__()
@@ -137,3 +76,35 @@ class NoticeBox(QFrame):
         self._messages.clear()
         self._label.clear()
         self.hide()
+
+
+class UpdateBanner(QFrame):
+    download_requested = Signal(str)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("banner")
+        self._url = ""
+        self._label = QLabel()
+        self._label.setObjectName("bannerText")
+        download = icon_button("Download", "download", "primary")
+        dismiss = QPushButton("✕")
+        dismiss.setObjectName("ghost")
+        dismiss.setFixedWidth(36)
+        dismiss.setCursor(Qt.CursorShape.PointingHandCursor)
+        download.clicked.connect(lambda: self.download_requested.emit(self._url))
+        dismiss.clicked.connect(self.hide)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 10, 10, 10)
+        layout.addWidget(self._label, stretch=1)
+        layout.addWidget(download)
+        layout.addWidget(dismiss)
+        self.hide()
+
+    def show_release(self, version: str, url: str) -> None:
+        self._url = url
+        self._label.setText(
+            f"<b>ClipTranslator {version.lstrip('v')} is available.</b> "
+            "Download the new installer and run it to update."
+        )
+        self.show()

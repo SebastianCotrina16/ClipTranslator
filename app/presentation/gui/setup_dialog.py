@@ -81,8 +81,11 @@ class InstallTask(QObject):
 
     def _install(self) -> setup_tasks.SelfTestResult:
         plan = self._plan
-        self.progressed.emit(-1, "Downloading the transcription model…")
-        setup_tasks.download_transcription_model(plan.whisper_model)
+        self.progressed.emit(-1, "Preparing the transcription model…")
+        setup_tasks.download_transcription_model(
+            plan.whisper_model,
+            lambda f: self.progressed.emit(f, f"Downloading the transcription model… {f:.0%}"),
+        )
         if plan.voice_isolation:
             setup_tasks.download_isolation_model(
                 self._isolation_model,

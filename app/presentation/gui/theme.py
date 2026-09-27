@@ -80,6 +80,27 @@ def stylesheet(assets: Path, p: Palette = PALETTE) -> str:
         border-radius: 12px;
     }}
     QLabel {{ background: transparent; }}
+    QFrame#banner {{
+        background: {p.accent_soft};
+        border: 1px solid rgba(167, 139, 250, 0.55);
+        border-radius: 12px;
+    }}
+    QListWidget {{
+        background: {p.field};
+        border: 1px solid {p.border};
+        border-radius: 12px;
+        padding: 6px;
+        outline: 0;
+    }}
+    QListWidget::item {{ padding: 8px; border-radius: 8px; }}
+    QListWidget::item:selected {{ background: {p.accent_soft}; }}
+    QListWidget::item:hover {{ background: {p.surface_hover}; }}
+    QDoubleSpinBox {{
+        background: {p.field};
+        border: 1px solid {p.border};
+        border-radius: 10px;
+        padding: 6px 8px;
+    }}
     QLabel#title {{ font-size: 17pt; font-weight: 700; }}
     QLabel#subtitle, QLabel#muted {{ color: {p.text_muted}; }}
     QLabel#section {{

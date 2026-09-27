@@ -33,12 +33,14 @@ Clone the repository and double-click `ClipTranslator.bat`. It installs everythi
 
 ## Usage
 
-1. Drop a video or audio file into the window, or click **Open file…**.
+1. Drop videos or a whole folder into the **Clips** list, or use **Add files** / **Add folder**.
 2. Choose the source language (or leave it on automatic detection) and the target language.
 3. Optionally add some context about the clip to improve the translation.
-4. Click **Generate subtitles**.
-5. Review the result: click a row to jump to that moment in the player, and edit any text directly in the table.
-6. Click **Export subtitles**.
+4. Click **Generate subtitles** for the selected clip, or **Process all** to subtitle and export every clip in the list.
+5. Review the result: click a line to jump to that moment in the player. Double-click any text or time to edit it, move lines **Earlier** or **Later**, and undo with **Ctrl+Z**. Edits are saved automatically.
+6. Click **Export subtitles**, or **Export video** to get a copy of the video with the subtitles burned in.
+
+The app tells you when a new version is available.
 
 ### Command line (optional)
 

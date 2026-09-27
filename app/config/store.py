@@ -52,6 +52,8 @@ class SettingsStore:
                 _merge_typed(getattr(settings, name), raw[name], name)
         if isinstance(raw.get("work_dir"), str):
             settings.work_dir = raw["work_dir"]
+        if isinstance(raw.get("check_for_updates"), bool):
+            settings.check_for_updates = raw["check_for_updates"]
         _validate_language(settings)
         return settings
 

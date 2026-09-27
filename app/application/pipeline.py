@@ -99,6 +99,7 @@ class RunState:
     work_dir: Path
     keys: dict[str, str] = field(default_factory=dict)
     speech_audio: Path | None = None
+    duration: float | None = None
     language: str | None = None
     language_detection: dict[str, Any] | None = None
     units: list[Unit] = field(default_factory=list)
@@ -196,6 +197,7 @@ class Pipeline:
         params = {"media": str(media), "size": stat.st_size, "mtime": stat.st_mtime}
         data = self._run_stage(Stage.AUDIO, params, compute, require_file="wav")
         self.state.speech_audio = self.state.work_dir / data["wav"]
+        self.state.duration = data.get("duration")
         return self.state.speech_audio
 
     def isolate_speech(self) -> Path:

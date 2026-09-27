@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from enum import IntEnum
 from typing import Any
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelIndex, Qt
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelIndex, Qt, Signal
+from PySide6.QtGui import QColor, QUndoStack
 
 from app.domain.models import Cue
 from app.domain.text import collapse_spaces
+from app.domain.timing import InvalidTimingError, edit_time_text, parse_time_text, retime, shift
+from app.presentation.gui.edit_commands import Changes, CueEditCommand, CueState, record_changes
 from app.presentation.gui.texts import flag_labels
 
 FLAGGED_ROW_COLOR = QColor(255, 196, 0, 45)
@@ -24,7 +27,9 @@ class Column(IntEnum):
     FLAGS = 5
 
 
-EDITABLE_COLUMNS = {Column.ORIGINAL, Column.TRANSLATION}
+TEXT_COLUMNS = {Column.ORIGINAL, Column.TRANSLATION}
+TIME_COLUMNS = {Column.START, Column.END}
+EDITABLE_COLUMNS = TEXT_COLUMNS | TIME_COLUMNS
 HEADERS = {
     Column.NUMBER: "#",
     Column.START: "Start",
@@ -36,25 +41,51 @@ HEADERS = {
 
 
 def short_time(seconds: float) -> str:
-    minutes, rest = divmod(max(seconds, 0.0), 60)
-    return f"{int(minutes)}:{rest:05.2f}"
+    return edit_time_text(seconds)
 
 
 class CueTableModel(QAbstractTableModel):
+    edited = Signal()
+    edit_rejected = Signal(str)
+
     def __init__(self) -> None:
         super().__init__()
         self._cues: list[Cue] = []
+        self.undo_stack = QUndoStack(self)
 
     def set_cues(self, cues: list[Cue]) -> None:
         self.beginResetModel()
         self._cues = cues
+        self.undo_stack.clear()
         self.endResetModel()
 
+    def refresh_rows(self, rows: list[int]) -> None:
+        for row in rows:
+            self.dataChanged.emit(self.index(row, 0), self.index(row, len(Column) - 1))
+
     def refresh_row(self, row: int) -> None:
-        self.dataChanged.emit(self.index(row, 0), self.index(row, len(Column) - 1))
+        self.refresh_rows([row])
 
     def cue_at(self, row: int) -> Cue | None:
         return self._cues[row] if 0 <= row < len(self._cues) else None
+
+    def shift_rows(self, rows: list[int], seconds: float) -> None:
+        valid = [row for row in rows if self.cue_at(row) is not None]
+        if not valid or seconds == 0:
+            return
+        direction = "later" if seconds > 0 else "earlier"
+        self._push(
+            f"Move {len(valid)} line(s) {abs(seconds):.2f} s {direction}",
+            valid,
+            lambda: shift([self._cues[row] for row in valid], seconds),
+        )
+
+    def record_external_change(self, row: int, before: CueState, description: str) -> None:
+        cue = self.cue_at(row)
+        if cue is None or CueState.of(cue) == before:
+            return
+        changes: Changes = {row: (before, CueState.of(cue))}
+        self.undo_stack.push(CueEditCommand(description, self._cues, changes, self._applied))
 
     def rowCount(self, parent: ModelIndex = ROOT) -> int:
         return 0 if parent.isValid() else len(self._cues)
@@ -78,8 +109,11 @@ class CueTableModel(QAbstractTableModel):
             return self._value(cue, column)
         if role == Qt.ItemDataRole.BackgroundRole and cue.flags:
             return FLAGGED_ROW_COLOR
-        if role == Qt.ItemDataRole.ToolTipRole and column is Column.FLAGS:
-            return flag_labels(cue.flags)
+        if role == Qt.ItemDataRole.ToolTipRole:
+            if column is Column.FLAGS:
+                return flag_labels(cue.flags)
+            if column in TIME_COLUMNS:
+                return "Double-click to edit, for example 1:08.50"
         return None
 
     def flags(self, index: ModelIndex) -> Qt.ItemFlag:
@@ -93,13 +127,39 @@ class CueTableModel(QAbstractTableModel):
         column = Column(index.column())
         if cue is None or role != Qt.ItemDataRole.EditRole or column not in EDITABLE_COLUMNS:
             return False
-        text = collapse_spaces(str(value))
-        if column is Column.ORIGINAL:
-            cue.original = text
-        else:
-            cue.translation = text
-        self.dataChanged.emit(index, index, [role])
+        try:
+            mutate = self._mutation(cue, column, str(value))
+        except InvalidTimingError as error:
+            self.edit_rejected.emit(str(error))
+            return False
+        self._push(f"Edit line {cue.index}", [index.row()], mutate)
         return True
+
+    def _mutation(self, cue: Cue, column: Column, value: str) -> Callable[[], None]:
+        if column in TEXT_COLUMNS:
+            text = collapse_spaces(value)
+            if column is Column.ORIGINAL:
+                return lambda: setattr(cue, "original", text)
+            return lambda: setattr(cue, "translation", text)
+        seconds = parse_time_text(value)
+        start = seconds if column is Column.START else cue.start
+        end = seconds if column is Column.END else cue.end
+        if start < 0 or end - start <= 0:
+            raise InvalidTimingError("The end time must be after the start time.")
+        return lambda: retime(cue, start, end)
+
+    def _push(self, description: str, rows: list[int], mutate: Callable[[], None]) -> None:
+        try:
+            changes = record_changes(self._cues, rows, mutate)
+        except InvalidTimingError as error:
+            self.edit_rejected.emit(str(error))
+            return
+        if changes:
+            self.undo_stack.push(CueEditCommand(description, self._cues, changes, self._applied))
+
+    def _applied(self, rows: list[int]) -> None:
+        self.refresh_rows(rows)
+        self.edited.emit()
 
     def _value(self, cue: Cue, column: Column) -> str:
         values = {

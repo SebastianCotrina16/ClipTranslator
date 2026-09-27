@@ -68,8 +68,8 @@ def isolation_ready(model: str) -> bool:
     return model_file(model, models_dir()).exists()
 
 
-def download_transcription_model(model: str) -> None:
-    download_whisper_model(model, whisper_models_dir())
+def download_transcription_model(model: str, progress: FractionCallback | None = None) -> None:
+    download_whisper_model(model, whisper_models_dir(), progress)
 
 
 def download_isolation_model(model: str, progress: FractionCallback | None = None) -> None:

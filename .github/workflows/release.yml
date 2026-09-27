@@ -59,6 +59,11 @@ jobs:
         run: |
           if ($env:GITHUB_REF_TYPE -eq "tag") {
             $version = $env:GITHUB_REF_NAME.TrimStart("v")
+            if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Tags must look like v1.2.3" }
+            $project = Get-Content pyproject.toml -Raw
+            $projectVersion = [regex]'(?m)^version = "[^"]*"'
+            $stamped = $projectVersion.Replace($project, "version = `"$version`"", 1)
+            Set-Content pyproject.toml $stamped -NoNewline -Encoding utf8
           } else {
             $version = "0.0.0-dev.$env:GITHUB_RUN_NUMBER"
           }

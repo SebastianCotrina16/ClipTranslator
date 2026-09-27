@@ -88,6 +88,7 @@ class Settings:
     subtitles: SubtitleSettings = field(default_factory=SubtitleSettings)
     performance: PerformanceSettings = field(default_factory=PerformanceSettings)
     work_dir: str = ""
+    check_for_updates: bool = True
 
     def work_root(self, default: Path) -> Path:
         return Path(self.work_dir) if self.work_dir else default
