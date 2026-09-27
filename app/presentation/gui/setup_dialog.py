@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QObject, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -32,6 +32,7 @@ from app.config.store import SettingsStore, data_dir
 from app.domain.languages import TARGET_LANGUAGES
 from app.infrastructure import setup_tasks
 from app.infrastructure.system_probe import scan
+from app.presentation.gui.background import BackgroundRunner
 from app.presentation.gui.texts import language_name
 
 PROGRESS_STEPS = 1000
@@ -111,8 +112,7 @@ class SetupDialog(QDialog):
         self._settings = store.load()
         self._report: SystemReport | None = None
         self._recommendation: Recommendation | None = None
-        self._thread: QThread | None = None
-        self._task: QObject | None = None
+        self._runner = BackgroundRunner(self)
         self._hardware = QLabel("Checking your computer…")
         self._profile = QLabel()
         self._warnings = QLabel()
@@ -136,11 +136,11 @@ class SetupDialog(QDialog):
 
     def showEvent(self, event: object) -> None:
         super().showEvent(event)
-        if self._report is None and self._thread is None:
+        if self._report is None and not self._runner.busy:
             self._start(ScanTask(self._settings.translation.ollama_url), self._on_scanned)
 
     def reject(self) -> None:
-        if self._thread is None:
+        if not self._runner.busy:
             super().reject()
 
     def _build(self) -> None:
@@ -336,21 +336,6 @@ class SetupDialog(QDialog):
         self._buttons.button(QDialogButtonBox.StandardButton.Save).setEnabled(editable)
 
     def _start(self, task: QObject, on_finished: object) -> None:
-        thread = QThread(self)
-        task.moveToThread(thread)
-        thread.started.connect(task.run)
         task.finished.connect(on_finished)
         task.failed.connect(self._on_failure)
-        task.finished.connect(thread.quit)
-        task.failed.connect(thread.quit)
-        thread.finished.connect(self._on_thread_finished)
-        self._thread, self._task = thread, task
-        thread.start()
-
-    def _on_thread_finished(self) -> None:
-        if self._thread is not None:
-            self._thread.deleteLater()
-        if self._task is not None:
-            self._task.deleteLater()
-        self._thread = None
-        self._task = None
+        self._runner.start(task, ("finished", "failed"))

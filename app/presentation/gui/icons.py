@@ -45,6 +45,7 @@ _STROKE_ICONS = {
     "folder": '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
     "refresh": '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
     "chevron": '<path d="M6 9l6 6 6-6"/>',
+    "undo": '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>',
     "check": '<path d="M5 12l5 5 9-10"/>',
 }
 

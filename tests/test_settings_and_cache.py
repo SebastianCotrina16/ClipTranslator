@@ -109,3 +109,24 @@ def test_language_codes_are_validated() -> None:
     for bad in ("", "english", "e1", "../x", "es-ES"):
         with pytest.raises(InvalidLanguageCodeError):
             parse_language_code(bad)
+
+
+def test_edits_are_restored_only_for_the_same_generation(tmp_path: Path) -> None:
+    from app.application.edits import EditStore
+    from app.domain.models import Cue
+
+    store = EditStore(tmp_path)
+    edited = [Cue(1, 0.0, 1.0, "hi", "hola editado", 0)]
+    assert store.load("key-a") is None
+    store.save("key-a", edited)
+    assert store.load("key-a") == edited
+    assert store.load("key-b") is None
+    store.discard()
+    assert store.load("key-a") is None
+
+
+def test_corrupted_edits_are_ignored(tmp_path: Path) -> None:
+    from app.application.edits import EDITS_FILE, EditStore
+
+    (tmp_path / EDITS_FILE).write_text("{broken", encoding="utf-8")
+    assert EditStore(tmp_path).load("key") is None

@@ -9,6 +9,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from app.application.edits import EditStore
 from app.application.language_detection import LanguageDetector
 from app.application.ports import (
     AudioTools,
@@ -105,6 +106,7 @@ class RunState:
     records: list[StageRecord] = field(default_factory=list)
     backends: dict[str, str] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    restored_edits: bool = False
 
 
 def cue_rules_from(subtitles: SubtitleSettings) -> CueRules:
@@ -142,6 +144,7 @@ class Pipeline:
         self.force = set(force or ())
         self.state = RunState(media=media, work_dir=work_dir)
         self.cache = StageCache(work_dir)
+        self.edits = EditStore(work_dir)
         self._transcriber: Transcriber | None = None
         self._language_model: LanguageModel | None = None
 
@@ -417,6 +420,7 @@ class Pipeline:
         if text is None:
             raise LanguageModelError("The model did not return a translation for that line.")
         target.translation = text
+        self.save_edits()
         return text
 
     def build_cues(self) -> list[Cue]:
@@ -432,7 +436,21 @@ class Pipeline:
             Stage.CUES, asdict(rules), compute, upstream=self.state.keys[Stage.TRANSLATION]
         )
         self.state.cues = cues_from_records(raw)
+        edited = self.edits.load(self.state.keys[Stage.CUES])
+        if edited is not None and len(edited) == len(self.state.cues):
+            self.state.cues = edited
+            self.state.restored_edits = True
         return self.state.cues
+
+    def save_edits(self) -> None:
+        if self.state.cues and Stage.CUES in self.state.keys:
+            self.edits.save(self.state.keys[Stage.CUES], self.state.cues)
+
+    def discard_edits(self) -> list[Cue]:
+        self.edits.discard()
+        self.state.restored_edits = False
+        self.state.keys.pop(Stage.CUES, None)
+        return self.build_cues()
 
     def export(self, output_dir: Path | None = None, vtt: bool = False) -> list[Path]:
         if not self.state.cues:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QModelIndex, QObject, Qt, QThread, QTimer, QUrl
+from PySide6.QtCore import QModelIndex, QObject, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 from app.application.pipeline import Pipeline
 from app.config.store import SettingsStore
 from app.domain.languages import ENGLISH_NAMES, TARGET_LANGUAGES
+from app.presentation.gui.background import BackgroundRunner
 from app.presentation.gui.cue_table import Column, CueTableModel
 from app.presentation.gui.icons import app_icon, logo_pixmap
 from app.presentation.gui.job import JobRequest, RetranslateJob, SubtitleJob
@@ -48,8 +49,7 @@ class MainWindow(QMainWindow):
         self._log_file = log_file
         self._media: Path | None = None
         self._pipeline: Pipeline | None = None
-        self._thread: QThread | None = None
-        self._job: QObject | None = None
+        self._runner = BackgroundRunner(self)
         self._files: list[Path] = []
         self._model = CueTableModel()
         self._player = SubtitledPlayer()
@@ -68,12 +68,13 @@ class MainWindow(QMainWindow):
         self._summary = QLabel("Subtitles will appear here.")
         self._show_original = QCheckBox("Original on video")
         self._retranslate_button = icon_button("Retranslate line", "refresh")
+        self._revert_button = icon_button("Revert edits", "undo")
         self._folder_button = icon_button("", "folder")
         self._export_button = icon_button("Export", "download", "primary")
         self._build()
 
     def open_media(self, media: Path) -> None:
-        if not media.is_file() or self._thread is not None:
+        if not media.is_file() or self._runner.busy:
             return
         self._media = media
         self._pipeline = None
@@ -120,6 +121,7 @@ class MainWindow(QMainWindow):
         self._summary.setObjectName("muted")
         self._folder_button.setToolTip("Open the output folder")
         self._retranslate_button.setToolTip("Translate the selected line again")
+        self._revert_button.setToolTip("Go back to the subtitles as they were generated")
         self._cancel_button.hide()
         self._table.setModel(self._model)
         self._table.setAlternatingRowColors(True)
@@ -186,6 +188,7 @@ class MainWindow(QMainWindow):
         toolbar.addSpacing(8)
         toolbar.addWidget(self._summary, stretch=1)
         toolbar.addWidget(self._show_original)
+        toolbar.addWidget(self._revert_button)
         toolbar.addWidget(self._retranslate_button)
         toolbar.addWidget(self._folder_button)
         toolbar.addWidget(self._export_button)
@@ -223,18 +226,20 @@ class MainWindow(QMainWindow):
         self._retranslate_button.clicked.connect(self._retranslate_selected)
         self._show_original.toggled.connect(self._player.show_original)
         self._table.clicked.connect(self._seek_to_row)
-        self._model.dataChanged.connect(lambda *_: self._player.refresh_caption())
+        self._model.dataChanged.connect(self._on_cues_edited)
+        self._runner.finished.connect(self._update_buttons)
+        self._revert_button.clicked.connect(self._revert_edits)
         self._table.selectionModel().selectionChanged.connect(lambda *_: self._update_buttons())
 
     def _choose_file(self) -> None:
-        if self._thread is not None:
+        if self._runner.busy:
             return
         path, _ = QFileDialog.getOpenFileName(self, "Open file", "", MEDIA_FILTER)
         if path:
             self.open_media(Path(path))
 
     def _start(self) -> None:
-        if self._media is None or self._thread is not None:
+        if self._media is None or self._runner.busy:
             return
         self._settings.translation.target_language = self._target.currentData()
         self._store.save(self._settings)
@@ -264,14 +269,15 @@ class MainWindow(QMainWindow):
         self._run_in_background(job)
 
     def _cancel(self) -> None:
-        if isinstance(self._job, SubtitleJob):
-            self._job.cancel()
+        job = self._runner.job
+        if isinstance(job, SubtitleJob):
+            job.cancel()
             self._cancel_button.setEnabled(False)
             self._stage.setText("Cancelling after the current step…")
 
     def _retranslate_selected(self) -> None:
         row = self._selected_row()
-        if self._pipeline is None or row is None or self._thread is not None:
+        if self._pipeline is None or row is None or self._runner.busy:
             return
         job = RetranslateJob(self._pipeline, row, self._context.text().strip())
         job.succeeded.connect(self._on_retranslated)
@@ -280,16 +286,8 @@ class MainWindow(QMainWindow):
         self._run_in_background(job)
 
     def _run_in_background(self, job: QObject) -> None:
-        thread = QThread(self)
-        job.moveToThread(thread)
-        thread.started.connect(job.run)
-        for signal_name in ("succeeded", "failed", "cancelled"):
-            signal = getattr(job, signal_name, None)
-            if signal is not None:
-                signal.connect(thread.quit)
-        thread.finished.connect(self._on_thread_finished)
-        self._thread, self._job = thread, job
-        thread.start()
+        done = [name for name in ("succeeded", "failed", "cancelled") if hasattr(job, name)]
+        self._runner.start(job, done)
         self._update_buttons()
 
     def _on_progress(self, overall: float, stage: str) -> None:
@@ -305,7 +303,40 @@ class MainWindow(QMainWindow):
         self._summary.setText(f"{len(cues)} lines · {flagged} to review")
         for warning in pipeline.state.warnings:
             self._notices.add(warning)
+        if pipeline.state.restored_edits:
+            self._notices.add("Your previous edits for this clip were restored.")
         self._table.resizeRowsToContents()
+        self._update_buttons()
+
+    def _on_cues_edited(self, *_: object) -> None:
+        self._player.refresh_caption()
+        if self._pipeline is None:
+            return
+        try:
+            self._pipeline.save_edits()
+        except OSError as error:
+            self._stage.setText(f"Could not save your edits: {error}")
+            return
+        self._pipeline.state.restored_edits = True
+        self._stage.setText("Edits saved automatically.")
+        self._update_buttons()
+
+    def _revert_edits(self) -> None:
+        if self._pipeline is None or self._runner.busy:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Revert edits",
+            "Discard your edits and go back to the subtitles as they were generated?",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        cues = self._pipeline.discard_edits()
+        self._model.set_cues(cues)
+        self._player.set_cues(cues)
+        self._table.resizeRowsToContents()
+        self._stage.setText("Edits discarded.")
+        self._update_buttons()
 
     def _on_retranslated(self, position: int, text: str) -> None:
         self._model.refresh_row(position)
@@ -328,15 +359,6 @@ class MainWindow(QMainWindow):
             )
         box.addButton(QMessageBox.StandardButton.Ok)
         box.exec()
-
-    def _on_thread_finished(self) -> None:
-        if self._thread is not None:
-            self._thread.deleteLater()
-        if self._job is not None:
-            self._job.deleteLater()
-        self._thread = None
-        self._job = None
-        self._update_buttons()
 
     def _export(self) -> None:
         if self._pipeline is None:
@@ -376,8 +398,8 @@ class MainWindow(QMainWindow):
         self._stage.setText(message)
 
     def _update_buttons(self) -> None:
-        running = self._thread is not None
-        processing = running and isinstance(self._job, SubtitleJob)
+        running = self._runner.busy
+        processing = running and isinstance(self._runner.job, SubtitleJob)
         has_result = self._pipeline is not None
         self._start_button.setVisible(not processing)
         self._cancel_button.setVisible(processing)
@@ -389,5 +411,8 @@ class MainWindow(QMainWindow):
         self._export_button.setEnabled(has_result and not running)
         self._retranslate_button.setEnabled(
             has_result and not running and self._selected_row() is not None
+        )
+        self._revert_button.setEnabled(
+            has_result and not running and self._pipeline.state.restored_edits
         )
         self._folder_button.setEnabled(self._media is not None)
