@@ -1,0 +1,104 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+from enum import StrEnum
+from typing import Any
+
+
+class Flag(StrEnum):
+    EMPTY = "vacio"
+    NO_SPEECH = "sin_voz"
+    LOW_CONFIDENCE = "baja_confianza"
+    REPETITIVE = "repetitivo"
+    KNOWN_PHRASE = "frase_tipica"
+    CORRECTED = "corregido"
+    UNTRANSLATED = "sin_traduccion"
+    FAST_READING = "lectura_rapida"
+
+
+@dataclass
+class Word:
+    start: float
+    end: float
+    text: str
+    probability: float = 1.0
+
+
+@dataclass
+class Segment:
+    id: int
+    start: float
+    end: float
+    text: str
+    words: list[Word]
+    avg_logprob: float = 0.0
+    no_speech_prob: float = 0.0
+    compression_ratio: float = 1.0
+    flags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Unit:
+    id: int
+    start: float
+    end: float
+    text: str
+    words: list[Word]
+    flags: list[str] = field(default_factory=list)
+    translation: str | None = None
+    asr_text: str | None = None
+
+
+@dataclass
+class Cue:
+    index: int
+    start: float
+    end: float
+    original: str
+    translation: str
+    unit_id: int
+    flags: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class LanguageGuess:
+    language: str
+    probability: float
+    all_probabilities: list[tuple[str, float]]
+
+
+@dataclass
+class LanguageDetection:
+    language: str
+    probability: float
+    windows: list[tuple[float, str, float]]
+    top: list[tuple[str, float]]
+
+
+def to_records(items: list[Any]) -> list[dict[str, Any]]:
+    return [asdict(item) for item in items]
+
+
+def words_from_records(records: list[dict[str, Any]]) -> list[Word]:
+    return [Word(**record) for record in records]
+
+
+def segments_from_records(records: list[dict[str, Any]]) -> list[Segment]:
+    return [Segment(**{**r, "words": words_from_records(r["words"])}) for r in records]
+
+
+def units_from_records(records: list[dict[str, Any]]) -> list[Unit]:
+    return [Unit(**{**r, "words": words_from_records(r["words"])}) for r in records]
+
+
+def cues_from_records(records: list[dict[str, Any]]) -> list[Cue]:
+    return [Cue(**record) for record in records]
+
+
+def language_detection_from_record(record: dict[str, Any]) -> LanguageDetection:
+    return LanguageDetection(
+        language=record["language"],
+        probability=record["probability"],
+        windows=[tuple(window) for window in record["windows"]],
+        top=[tuple(entry) for entry in record["top"]],
+    )
