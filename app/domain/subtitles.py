@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from app.domain.models import Cue, Flag, Unit, Word
 from app.domain.text import collapse_spaces, ends_clause, ends_sentence, join_words
@@ -158,7 +158,13 @@ class CueBuilder:
             flags = list(unit.flags)
             if not translated and Flag.UNTRANSLATED not in flags:
                 flags.append(Flag.UNTRANSLATED)
-            for part in self._split_unit(unit, unit.translation or unit.text):
+            translation = unit.translation or unit.text
+            parts = (
+                [_CuePart(unit.start, unit.end, unit.text, translation)]
+                if unit.versions
+                else self._split_unit(unit, translation)
+            )
+            for part in parts:
                 cues.append(
                     Cue(
                         index=len(cues) + 1,
@@ -168,6 +174,7 @@ class CueBuilder:
                         translation=part.translation if translated else "",
                         unit_id=unit.id,
                         flags=list(flags),
+                        versions=[replace(version) for version in unit.versions],
                     )
                 )
         self._adjust_timing(cues)

@@ -17,6 +17,7 @@ ClipTranslator uses the following third-party models and software. Each one is d
 | Component | License | Source |
 |---|---|---|
 | uv | MIT or Apache-2.0 | https://github.com/astral-sh/uv |
+| Python 3.12 (python-build-standalone) | PSF-2.0 | https://github.com/astral-sh/python-build-standalone |
 | Microsoft Visual C++ Redistributable | Microsoft Software License Terms | https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist |
 
 ## Installed as dependencies

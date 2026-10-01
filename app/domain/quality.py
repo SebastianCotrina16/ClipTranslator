@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.domain.models import Flag, Segment, Unit
+from app.domain.models import REVIEW_FLAGS, Flag, Segment, Unit
 from app.domain.text import collapse_spaces, normalize_for_comparison
 
 KNOWN_HALLUCINATIONS = (
@@ -18,9 +18,9 @@ KNOWN_HALLUCINATIONS = (
     "subtitles by",
     "amaraorg",
     "untertitel im auftrag des zdf",
-    "sous-titrage st 501",
-    "sous-titres realises par",
-    "sous-titres par",
+    "sous-titrage",
+    "sous-titres",
+    "societe radio-canada",
     "merci davoir regarde",
     "obrigado por assistir",
     "legendas pela comunidade amaraorg",
@@ -48,7 +48,8 @@ class HallucinationDetector:
 
     def flag(self, segments: list[Segment]) -> list[Segment]:
         for segment in segments:
-            segment.flags = self.flags_for(segment)
+            kept = [flag for flag in segment.flags if flag in REVIEW_FLAGS]
+            segment.flags = kept + self.flags_for(segment)
         return segments
 
     def flags_for(self, segment: Segment) -> list[str]:

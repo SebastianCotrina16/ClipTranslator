@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.domain.models import Segment, Unit, Word
+from app.domain.models import REVIEW_FLAGS, Reading, Segment, Unit, Word
 from app.domain.text import ends_clause, ends_sentence, join_words
 
 
@@ -16,6 +16,8 @@ class SegmentationRules:
 class _WordGroup:
     words: list[Word] = field(default_factory=list)
     flags: set[str] = field(default_factory=set)
+    versions: list[Reading] = field(default_factory=list)
+    whole: bool = False
 
 
 class UnitBuilder:
@@ -25,10 +27,13 @@ class UnitBuilder:
     def build(self, segments: list[Segment]) -> list[Unit]:
         units: list[Unit] = []
         for group in self._group_words(segments):
-            for words in self._split_long(group.words):
+            pieces = [group.words] if group.whole else self._split_long(group.words)
+            for words in pieces:
                 text = join_words(words)
                 if text:
-                    units.append(self._make_unit(len(units), words, text, group.flags))
+                    unit = self._make_unit(len(units), words, text, group.flags)
+                    unit.versions = list(group.versions)
+                    units.append(unit)
         return units
 
     def _group_words(self, segments: list[Segment]) -> list[_WordGroup]:
@@ -42,6 +47,18 @@ class UnitBuilder:
             current = _WordGroup()
 
         for segment in segments:
+            if REVIEW_FLAGS.intersection(segment.flags):
+                close_current()
+                groups.append(
+                    _WordGroup(
+                        words=list(segment.words)
+                        or [Word(segment.start, segment.end, segment.text)],
+                        flags=set(segment.flags),
+                        versions=list(segment.versions),
+                        whole=True,
+                    )
+                )
+                continue
             if segment.flags:
                 close_current()
             for word in segment.words or [Word(segment.start, segment.end, segment.text)]:

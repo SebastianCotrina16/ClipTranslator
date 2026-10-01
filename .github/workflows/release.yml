@@ -34,6 +34,19 @@ jobs:
           $uv = Get-ChildItem build/uv-files -Recurse -Filter uv.exe | Select-Object -First 1
           Copy-Item $uv.FullName build/uv.exe
 
+      - name: Bundle Python
+        shell: pwsh
+        run: |
+          build/uv.exe python install 3.12 --install-dir build/python-download --no-bin --no-registry
+          $runtime = Get-ChildItem build/python-download -Directory |
+            Where-Object { $_.Name -match '^cpython-3\.12\.\d+-windows-x86_64-none$' } |
+            Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
+            Select-Object -First 1
+          if (-not $runtime) { throw "Python 3.12 was not downloaded" }
+          Copy-Item $runtime.FullName build/python -Recurse
+          & build/python/python.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "The bundled Python does not run" }
+
       - name: Download the Visual C++ runtime
         shell: pwsh
         run: |

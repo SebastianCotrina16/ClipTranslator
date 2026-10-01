@@ -21,7 +21,13 @@ from app.application.ports import (
     VocalSeparator,
 )
 from app.application.stage_cache import StageCache
-from app.application.translation import Request, Task, TranslationService
+from app.application.translation import (
+    Request,
+    Task,
+    TranslationService,
+    fill_versions,
+    translate_versions,
+)
 from app.config.prompts import MERGED_REVIEW_ADDENDUM, REVIEW_PROMPT
 from app.config.settings import Settings, SubtitleSettings, redacted
 from app.domain.models import (
@@ -365,9 +371,18 @@ class Pipeline:
             if not result and units:
                 detail = report.errors[-1] if report.errors else "invalid responses"
                 raise LanguageModelError(f"Nothing could be translated: {detail}")
+            plain = Request(Task.TRANSLATE, language, translation.target_language, clip_context)
+            versions = translate_versions(
+                TranslationService(model),
+                units,
+                result,
+                plain,
+                translation.effective_system_prompt(),
+            )
             return {
                 "translations": _string_keys(result),
                 "corrections": _string_keys(report.corrections),
+                "versions": _string_keys(versions),
                 "report": asdict(report),
             }
 
@@ -386,8 +401,10 @@ class Pipeline:
         finally:
             model.unload()
         apply_corrections(units, data.get("corrections", {}))
+        versions = data.get("versions", {})
         for unit in units:
             unit.translation = data["translations"].get(str(unit.id))
+            fill_versions(unit, versions.get(str(unit.id), []))
         self.state.records[-1].detail = json.dumps(data["report"], ensure_ascii=False)
         if data["report"]["untranslated"]:
             self.cache.invalidate(Stage.TRANSLATION)
@@ -473,6 +490,8 @@ class Pipeline:
     def _keep_original_language(self, units: list[Unit]) -> list[Unit]:
         for unit in units:
             unit.translation = unit.text
+            for version in unit.versions:
+                version.translation = version.text
         self.state.keys[Stage.TRANSLATION] = self.state.keys[Stage.REVIEW] + "-same-language"
         self.state.backends["translation"] = "not translated (same language)"
         if self._language_model is not None:
@@ -548,7 +567,7 @@ class Pipeline:
             log_file.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-def _string_keys(values: dict[int, str]) -> dict[str, str]:
+def _string_keys(values: dict[int, Any]) -> dict[str, Any]:
     return {str(key): value for key, value in values.items()}
 
 

@@ -51,6 +51,7 @@ from app.presentation.gui.job import (
 from app.presentation.gui.player import SubtitledPlayer
 from app.presentation.gui.setup_dialog import SetupDialog
 from app.presentation.gui.texts import MEDIA_FILTER, language_name, stage_label
+from app.presentation.gui.versions_dialog import VersionsDialog
 from app.presentation.gui.video_style_dialog import VideoStyleDialog
 from app.presentation.gui.widgets import NoticeBox, UpdateBanner, card, icon_button, section_label
 
@@ -118,6 +119,7 @@ class MainWindow(QMainWindow):
         self._earlier_button = icon_button("Earlier", "earlier")
         self._later_button = icon_button("Later", "later")
         self._retranslate_button = icon_button("Retranslate", "refresh")
+        self._versions_button = icon_button("Versions", "queue")
         self._revert_button = icon_button("Revert", "undo")
         self._folder_button = icon_button("", "folder")
         self._export_video_button = icon_button("Export video", "video")
@@ -202,6 +204,7 @@ class MainWindow(QMainWindow):
             self._earlier_button: "Show the selected lines earlier (Alt+Left)",
             self._later_button: "Show the selected lines later (Alt+Right)",
             self._retranslate_button: "Translate the selected line again",
+            self._versions_button: "See what each model heard on this line and pick one",
             self._revert_button: "Go back to the subtitles as they were generated",
             self._folder_button: "Open the output folder",
             self._export_video_button: "Create a copy of the video with the subtitles burned in",
@@ -290,6 +293,7 @@ class MainWindow(QMainWindow):
             self._earlier_button,
             self._later_button,
             self._retranslate_button,
+            self._versions_button,
             self._revert_button,
         ):
             tools.addWidget(widget)
@@ -332,6 +336,7 @@ class MainWindow(QMainWindow):
         self._export_video_button.clicked.connect(self._export_video)
         self._folder_button.clicked.connect(self._open_folder)
         self._retranslate_button.clicked.connect(self._retranslate_selected)
+        self._versions_button.clicked.connect(self._choose_version)
         self._revert_button.clicked.connect(self._revert_edits)
         self._undo_button.clicked.connect(self._model.undo_stack.undo)
         self._redo_button.clicked.connect(self._model.undo_stack.redo)
@@ -530,6 +535,19 @@ class MainWindow(QMainWindow):
         self._table.resizeRowToContents(position)
         self._player.refresh_caption()
         self._stage.setText(f"Line {position + 1} retranslated.")
+
+    def _selected_versions(self) -> Cue | None:
+        rows = self._selected_rows()
+        cue = self._model.cue_at(rows[0]) if len(rows) == 1 else None
+        return cue if cue is not None and len(cue.versions) > 1 else None
+
+    def _choose_version(self) -> None:
+        cue = self._selected_versions()
+        if cue is None or self._runner.busy:
+            return
+        dialog = VersionsDialog(cue, self)
+        if dialog.exec():
+            self._model.use_version(self._selected_rows()[0], dialog.chosen())
 
     def _revert_edits(self) -> None:
         if self._pipeline is None or self._runner.busy:
@@ -788,6 +806,7 @@ class MainWindow(QMainWindow):
         for widget in (self._shift, self._earlier_button, self._later_button):
             widget.setEnabled(editable)
         self._retranslate_button.setEnabled(editable and len(self._selected_rows()) == 1)
+        self._versions_button.setEnabled(editable and self._selected_versions() is not None)
         self._revert_button.setEnabled(editable and self._pipeline.state.restored_edits)
         self._export_button.setEnabled(editable)
         media_has_video = self._media is not None and has_video(self._media)

@@ -7,7 +7,7 @@ from typing import Any
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelIndex, Qt, Signal
 from PySide6.QtGui import QColor, QUndoStack
 
-from app.domain.models import Cue
+from app.domain.models import Cue, Reading
 from app.domain.text import collapse_spaces
 from app.domain.timing import InvalidTimingError, edit_time_text, parse_time_text, retime, shift
 from app.presentation.gui.edit_commands import Changes, CueEditCommand, CueState, record_changes
@@ -79,6 +79,17 @@ class CueTableModel(QAbstractTableModel):
             valid,
             lambda: shift([self._cues[row] for row in valid], seconds),
         )
+
+    def use_version(self, row: int, version: Reading) -> None:
+        cue = self.cue_at(row)
+        if cue is None:
+            return
+
+        def mutate() -> None:
+            cue.original = version.text
+            cue.translation = version.translation or ""
+
+        self._push(f"Choose a version of line {cue.index}", [row], mutate)
 
     def record_external_change(self, row: int, before: CueState, description: str) -> None:
         cue = self.cue_at(row)

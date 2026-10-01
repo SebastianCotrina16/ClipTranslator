@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from app.domain.models import Segment
@@ -68,13 +68,16 @@ def word_count(segments: Iterable[Segment]) -> int:
 
 
 def replace_regions(
-    segments: list[Segment], retried: list[Segment], regions: list[Region]
+    segments: list[Segment],
+    retried: list[Segment],
+    regions: list[Region],
+    trusted: Callable[[Segment], bool] = lambda segment: True,
 ) -> list[Segment]:
     def inside(segment: Segment) -> bool:
         return any(region.holds(segment) for region in regions)
 
-    old = [segment for segment in segments if inside(segment)]
-    new = [segment for segment in retried if inside(segment)]
+    old = [segment for segment in segments if inside(segment) and trusted(segment)]
+    new = [segment for segment in retried if inside(segment) and trusted(segment)]
     if word_count(new) <= word_count(old):
         return segments
     merged = sorted(

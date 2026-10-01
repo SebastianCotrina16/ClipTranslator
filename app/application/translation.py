@@ -286,3 +286,40 @@ class TranslationService:
 def _notify(progress: Callable[[float], None] | None, done: int, total: int) -> None:
     if progress:
         progress(done / max(total, 1))
+
+
+VERSION_NEIGHBOURS = 3
+
+
+def translate_versions(
+    service: TranslationService,
+    units: list[Unit],
+    translations: dict[int, str],
+    request: Request,
+    system_prompt: str,
+) -> dict[int, list[str | None]]:
+    result: dict[int, list[str | None]] = {}
+    for position, unit in enumerate(units):
+        if len(unit.versions) < 2:
+            continue
+        nearby = units[max(position - VERSION_NEIGHBOURS, 0) : position + VERSION_NEIGHBOURS + 1]
+        surrounding = [
+            {"id": other.id, "text": other.text, "translation": translations[other.id]}
+            for other in nearby
+            if other is not unit and other.id in translations
+        ]
+        result[unit.id] = [None] + [
+            service.translate_one(
+                {"id": unit.id, "text": version.text}, request, system_prompt, surrounding
+            )
+            for version in unit.versions[1:]
+        ]
+    return result
+
+
+def fill_versions(unit: Unit, translations: list[str | None]) -> None:
+    for position, version in enumerate(unit.versions):
+        if position == 0:
+            version.text, version.translation = unit.text, unit.translation
+        elif position < len(translations):
+            version.translation = translations[position]

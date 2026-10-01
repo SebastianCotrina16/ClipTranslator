@@ -14,6 +14,11 @@ class Flag(StrEnum):
     CORRECTED = "corrected"
     UNTRANSLATED = "untranslated"
     FAST_READING = "fast_reading"
+    MODELS_DISAGREE = "models_disagree"
+    SECOND_MODEL = "second_model"
+
+
+REVIEW_FLAGS = frozenset({Flag.MODELS_DISAGREE, Flag.SECOND_MODEL})
 
 
 @dataclass
@@ -22,6 +27,13 @@ class Word:
     end: float
     text: str
     probability: float = 1.0
+
+
+@dataclass
+class Reading:
+    source: str
+    text: str
+    translation: str | None = None
 
 
 @dataclass
@@ -35,6 +47,7 @@ class Segment:
     no_speech_prob: float = 0.0
     compression_ratio: float = 1.0
     flags: list[str] = field(default_factory=list)
+    versions: list[Reading] = field(default_factory=list)
 
 
 @dataclass
@@ -47,6 +60,7 @@ class Unit:
     flags: list[str] = field(default_factory=list)
     translation: str | None = None
     asr_text: str | None = None
+    versions: list[Reading] = field(default_factory=list)
 
 
 @dataclass
@@ -58,6 +72,7 @@ class Cue:
     translation: str
     unit_id: int
     flags: list[str] = field(default_factory=list)
+    versions: list[Reading] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -83,16 +98,38 @@ def words_from_records(records: list[dict[str, Any]]) -> list[Word]:
     return [Word(**record) for record in records]
 
 
+def readings_from_records(records: list[dict[str, Any]]) -> list[Reading]:
+    return [Reading(**record) for record in records]
+
+
 def segments_from_records(records: list[dict[str, Any]]) -> list[Segment]:
-    return [Segment(**{**r, "words": words_from_records(r["words"])}) for r in records]
+    return [
+        Segment(
+            **{
+                **r,
+                "words": words_from_records(r["words"]),
+                "versions": readings_from_records(r.get("versions", [])),
+            }
+        )
+        for r in records
+    ]
 
 
 def units_from_records(records: list[dict[str, Any]]) -> list[Unit]:
-    return [Unit(**{**r, "words": words_from_records(r["words"])}) for r in records]
+    return [
+        Unit(
+            **{
+                **r,
+                "words": words_from_records(r["words"]),
+                "versions": readings_from_records(r.get("versions", [])),
+            }
+        )
+        for r in records
+    ]
 
 
 def cues_from_records(records: list[dict[str, Any]]) -> list[Cue]:
-    return [Cue(**record) for record in records]
+    return [Cue(**{**r, "versions": readings_from_records(r.get("versions", []))}) for r in records]
 
 
 def language_detection_from_record(record: dict[str, Any]) -> LanguageDetection:

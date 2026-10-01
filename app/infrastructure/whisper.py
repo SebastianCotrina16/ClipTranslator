@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import io
+import logging
 import os
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -12,10 +13,15 @@ import numpy as np
 from app.application.ports import FractionCallback
 from app.domain.coverage import Region, replace_regions, skipped_regions
 from app.domain.models import LanguageGuess, Segment, Word
+from app.domain.quality import HallucinationDetector
+from app.domain.second_opinion import doubtful_regions, settle, trusted_by
 from app.infrastructure.gpu import expose_cuda_libraries, whisper_defaults
 
+log = logging.getLogger(__name__)
+
 TEMPERATURE_FALLBACK = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
-ENGINE_REVISION = 2
+ENGINE_REVISION = 5
+SECOND_OPINION_DOWNLOAD_SHARE = 0.1
 SAMPLE_RATE = 16_000
 FIRST_PASS_SHARE = 0.8
 SHORT_REGION_SILENCE_MS = 300
@@ -38,6 +44,7 @@ class WhisperOptions:
     hallucination_silence_threshold: float | None = 2.0
     cpu_threads: int = 0
     recover_skipped_speech: bool = True
+    second_opinion_model: str = "large-v2"
 
 
 class FasterWhisperTranscriber:
@@ -95,13 +102,68 @@ class FasterWhisperTranscriber:
         if recover:
             from faster_whisper.vad import VadOptions
 
-            skipped = skipped_regions(speech_regions(audio, VadOptions()), segments)
+            trusted = trusted_by(HallucinationDetector())
+            long_regions = speech_regions(audio, VadOptions())
+            skipped = skipped_regions(long_regions, [s for s in segments if trusted(s)])
             if skipped:
                 retried = self._region_by_region(audio, language, initial_prompt, skipped)
-                segments = replace_regions(segments, retried, skipped)
+                segments = replace_regions(segments, retried, skipped, trusted)
+            segments = self._double_check(
+                audio, language, segments, long_regions, skipped, progress
+            )
         if progress:
             progress(1.0)
         return segments
+
+    def _double_check(
+        self,
+        audio: np.ndarray,
+        language: str,
+        segments: list[Segment],
+        long_regions: list[Region],
+        skipped: list[Region],
+        progress: FractionCallback | None,
+    ) -> list[Segment]:
+        second_name = self.options.second_opinion_model
+        if not second_name or second_name == self.options.model:
+            return segments
+        detector = HallucinationDetector()
+        doubtful = doubtful_regions(
+            speech_regions(audio, short_region_options()), segments, skipped, detector
+        )
+        if not doubtful:
+            return segments
+        second = self._second_model(progress)
+        if second is None:
+            return segments
+        heard: list[Segment] = []
+        try:
+            for span in long_regions:
+                if not any(span.start < gap.end and span.end > gap.start for gap in doubtful):
+                    continue
+                piece = audio[int(span.start * SAMPLE_RATE) : int(span.end * SAMPLE_RATE)]
+                for segment in self._pass(piece, language, None, model=second):
+                    heard.append(shifted(segment, span.start, len(heard)))
+        finally:
+            del second
+            gc.collect()
+        return settle(segments, heard, doubtful, (self.options.model, second_name), detector)
+
+    def _second_model(self, progress: FractionCallback | None) -> Any:
+        name = self.options.second_opinion_model
+
+        def report(fraction: float) -> None:
+            if progress:
+                progress(FIRST_PASS_SHARE + SECOND_OPINION_DOWNLOAD_SHARE * fraction)
+
+        try:
+            if not is_model_downloaded(name, self._models_dir):
+                download_whisper_model(name, self._models_dir, report)
+            self.unload()
+            return self._create_model(name)
+        except Exception:
+            log.exception("The second opinion model %s is not available", name)
+            return None
 
     def _region_by_region(
         self,
@@ -110,15 +172,8 @@ class FasterWhisperTranscriber:
         initial_prompt: str | None,
         skipped: list[Region],
     ) -> list[Segment]:
-        from faster_whisper.vad import VadOptions
-
-        short = VadOptions(
-            min_silence_duration_ms=SHORT_REGION_SILENCE_MS,
-            max_speech_duration_s=SHORT_REGION_MAX_SECONDS,
-            speech_pad_ms=SHORT_REGION_PAD_MS,
-        )
         segments: list[Segment] = []
-        for region in speech_regions(audio, short):
+        for region in speech_regions(audio, short_region_options()):
             if not any(region.start < gap.end and region.end > gap.start for gap in skipped):
                 continue
             piece = audio[int(region.start * SAMPLE_RATE) : int(region.end * SAMPLE_RATE)]
@@ -135,9 +190,10 @@ class FasterWhisperTranscriber:
         progress_from: float = 0.0,
         progress_to: float = 1.0,
         vad: bool | None = None,
+        model: Any = None,
     ) -> list[Segment]:
         o = self.options
-        raw_segments, info = self._loaded_model().transcribe(
+        raw_segments, info = (model or self._loaded_model()).transcribe(
             audio,
             language=language,
             beam_size=o.beam_size,
@@ -163,19 +219,32 @@ class FasterWhisperTranscriber:
 
     def _loaded_model(self) -> Any:
         if self._model is None:
-            if self.options.device == "cuda":
-                expose_cuda_libraries()
-            quiet_model_downloads()
-            from faster_whisper import WhisperModel
-
-            self._model = WhisperModel(
-                self.options.model,
-                device=self.options.device,
-                compute_type=self.options.compute_type,
-                download_root=str(self._models_dir),
-                cpu_threads=self.options.cpu_threads,
-            )
+            self._model = self._create_model(self.options.model)
         return self._model
+
+    def _create_model(self, name: str) -> Any:
+        if self.options.device == "cuda":
+            expose_cuda_libraries()
+        quiet_model_downloads()
+        from faster_whisper import WhisperModel
+
+        return WhisperModel(
+            name,
+            device=self.options.device,
+            compute_type=self.options.compute_type,
+            download_root=str(self._models_dir),
+            cpu_threads=self.options.cpu_threads,
+        )
+
+
+def short_region_options() -> Any:
+    from faster_whisper.vad import VadOptions
+
+    return VadOptions(
+        min_silence_duration_ms=SHORT_REGION_SILENCE_MS,
+        max_speech_duration_s=SHORT_REGION_MAX_SECONDS,
+        speech_pad_ms=SHORT_REGION_PAD_MS,
+    )
 
 
 def speech_regions(audio: np.ndarray, options: Any) -> list[Region]:

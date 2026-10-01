@@ -61,7 +61,12 @@ def test_region_timestamps_are_moved_back_into_the_clip() -> None:
 
 @pytest.mark.parametrize(
     "text",
-    ["Sous-titres par Jérémy Diaz", "Sous-titres réalisés par la communauté d'Amara.org"],
+    [
+        "Sous-titres par Jérémy Diaz",
+        "Sous-titres réalisés par la communauté d'Amara.org",
+        "Sous-titrage ST' 501",
+        "Sous-titrage Société Radio-Canada",
+    ],
 )
 def test_hyphenated_made_up_phrases_are_flagged(text: str) -> None:
     flags = HallucinationDetector().flags_for(make_segment(text))
