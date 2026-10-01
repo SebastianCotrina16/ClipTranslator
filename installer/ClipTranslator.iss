@@ -108,26 +108,32 @@ end;
 
 function IsInsideApp(Process: Variant): Boolean;
 var
+  Value: Variant;
   Path: String;
 begin
   Result := False;
-  if VarIsNull(Process.ExecutablePath) then
+  Value := Process.ExecutablePath;
+  if VarIsNull(Value) or VarIsEmpty(Value) then
     Exit;
-  Path := Lowercase(Process.ExecutablePath);
+  Path := Value;
+  Path := Lowercase(Path);
   Result := Pos(Lowercase(AddBackslash(ExpandConstant('{app}'))), Path) = 1;
 end;
 
 function CountRunningApp(): Integer;
 var
-  Processes: Variant;
+  Processes, Process: Variant;
   Index: Integer;
 begin
   Result := 0;
   try
     Processes := RunningAppProcesses();
     for Index := 0 to Processes.Count - 1 do
-      if IsInsideApp(Processes.ItemIndex(Index)) then
+    begin
+      Process := Processes.ItemIndex(Index);
+      if IsInsideApp(Process) then
         Result := Result + 1;
+    end;
   except
     Result := 0;
   end;
