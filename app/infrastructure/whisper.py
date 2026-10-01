@@ -3,17 +3,24 @@ from __future__ import annotations
 import gc
 import io
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from app.application.ports import FractionCallback
+from app.domain.coverage import Region, replace_regions, skipped_regions
 from app.domain.models import LanguageGuess, Segment, Word
 from app.infrastructure.gpu import expose_cuda_libraries, whisper_defaults
 
 TEMPERATURE_FALLBACK = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+ENGINE_REVISION = 2
+SAMPLE_RATE = 16_000
+FIRST_PASS_SHARE = 0.8
+SHORT_REGION_SILENCE_MS = 300
+SHORT_REGION_MAX_SECONDS = 8.0
+SHORT_REGION_PAD_MS = 200
 
 
 def quiet_model_downloads() -> None:
@@ -30,6 +37,7 @@ class WhisperOptions:
     vad: bool = True
     hallucination_silence_threshold: float | None = 2.0
     cpu_threads: int = 0
+    recover_skipped_speech: bool = True
 
 
 class FasterWhisperTranscriber:
@@ -68,7 +76,7 @@ class FasterWhisperTranscriber:
 
     @property
     def cache_identity(self) -> dict[str, Any]:
-        return asdict(self.options)
+        return asdict(self.options) | {"revision": ENGINE_REVISION}
 
     def detect_language(self, audio: np.ndarray) -> LanguageGuess:
         language, probability, all_probabilities = self._loaded_model().detect_language(audio=audio)
@@ -81,6 +89,53 @@ class FasterWhisperTranscriber:
         initial_prompt: str | None = None,
         progress: FractionCallback | None = None,
     ) -> list[Segment]:
+        recover = self.options.vad and self.options.recover_skipped_speech
+        first_share = FIRST_PASS_SHARE if recover else 1.0
+        segments = self._pass(audio, language, initial_prompt, progress, 0.0, first_share)
+        if recover:
+            from faster_whisper.vad import VadOptions
+
+            skipped = skipped_regions(speech_regions(audio, VadOptions()), segments)
+            if skipped:
+                retried = self._region_by_region(audio, language, initial_prompt, skipped)
+                segments = replace_regions(segments, retried, skipped)
+        if progress:
+            progress(1.0)
+        return segments
+
+    def _region_by_region(
+        self,
+        audio: np.ndarray,
+        language: str,
+        initial_prompt: str | None,
+        skipped: list[Region],
+    ) -> list[Segment]:
+        from faster_whisper.vad import VadOptions
+
+        short = VadOptions(
+            min_silence_duration_ms=SHORT_REGION_SILENCE_MS,
+            max_speech_duration_s=SHORT_REGION_MAX_SECONDS,
+            speech_pad_ms=SHORT_REGION_PAD_MS,
+        )
+        segments: list[Segment] = []
+        for region in speech_regions(audio, short):
+            if not any(region.start < gap.end and region.end > gap.start for gap in skipped):
+                continue
+            piece = audio[int(region.start * SAMPLE_RATE) : int(region.end * SAMPLE_RATE)]
+            for segment in self._pass(piece, language, initial_prompt, vad=False):
+                segments.append(shifted(segment, region.start, len(segments)))
+        return segments
+
+    def _pass(
+        self,
+        audio: np.ndarray,
+        language: str,
+        initial_prompt: str | None,
+        progress: FractionCallback | None = None,
+        progress_from: float = 0.0,
+        progress_to: float = 1.0,
+        vad: bool | None = None,
+    ) -> list[Segment]:
         o = self.options
         raw_segments, info = self._loaded_model().transcribe(
             audio,
@@ -89,7 +144,7 @@ class FasterWhisperTranscriber:
             temperature=list(TEMPERATURE_FALLBACK),
             condition_on_previous_text=False,
             word_timestamps=True,
-            vad_filter=o.vad,
+            vad_filter=o.vad if vad is None else vad,
             hallucination_silence_threshold=o.hallucination_silence_threshold,
             initial_prompt=initial_prompt or None,
         )
@@ -98,7 +153,8 @@ class FasterWhisperTranscriber:
         for raw in raw_segments:
             segments.append(_to_segment(len(segments), raw))
             if progress:
-                progress(min(raw.end / total, 1.0))
+                done = min(raw.end / total, 1.0)
+                progress(progress_from + (progress_to - progress_from) * done)
         return segments
 
     def unload(self) -> None:
@@ -120,6 +176,29 @@ class FasterWhisperTranscriber:
                 cpu_threads=self.options.cpu_threads,
             )
         return self._model
+
+
+def speech_regions(audio: np.ndarray, options: Any) -> list[Region]:
+    from faster_whisper.vad import get_speech_timestamps
+
+    return [
+        Region(stamp["start"] / SAMPLE_RATE, stamp["end"] / SAMPLE_RATE)
+        for stamp in get_speech_timestamps(audio, options)
+    ]
+
+
+def shifted(segment: Segment, seconds: float, segment_id: int) -> Segment:
+    words = [
+        Word(word.start + seconds, word.end + seconds, word.text, word.probability)
+        for word in segment.words
+    ]
+    return replace(
+        segment,
+        id=segment_id,
+        start=segment.start + seconds,
+        end=segment.end + seconds,
+        words=words,
+    )
 
 
 def _to_segment(segment_id: int, raw: Any) -> Segment:

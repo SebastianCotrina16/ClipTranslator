@@ -20,6 +20,7 @@ KNOWN_HALLUCINATIONS = (
     "untertitel im auftrag des zdf",
     "sous-titrage st 501",
     "sous-titres realises par",
+    "sous-titres par",
     "merci davoir regarde",
     "obrigado por assistir",
     "legendas pela comunidade amaraorg",
@@ -29,6 +30,7 @@ KNOWN_HALLUCINATIONS = (
     "字幕由amaraorg社区提供",
     "请不吝点赞 订阅 转发 打赏支持明镜与点点栏目",
 )
+NORMALIZED_HALLUCINATIONS = tuple(normalize_for_comparison(p) for p in KNOWN_HALLUCINATIONS)
 
 
 @dataclass(frozen=True)
@@ -64,7 +66,7 @@ class HallucinationDetector:
             segment.text
         ):
             flags.append(Flag.REPETITIVE)
-        if any(phrase in normalized for phrase in KNOWN_HALLUCINATIONS):
+        if any(phrase in normalized for phrase in NORMALIZED_HALLUCINATIONS):
             flags.append(Flag.KNOWN_PHRASE)
         return flags
 
