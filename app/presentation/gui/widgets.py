@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import html
+
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
@@ -80,31 +82,61 @@ class NoticeBox(QFrame):
 
 class UpdateBanner(QFrame):
     download_requested = Signal(str)
+    update_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("banner")
         self._url = ""
+        self._automatic = False
         self._label = QLabel()
         self._label.setObjectName("bannerText")
-        download = icon_button("Download", "download", "primary")
-        dismiss = QPushButton("✕")
-        dismiss.setObjectName("ghost")
-        dismiss.setFixedWidth(36)
-        dismiss.setCursor(Qt.CursorShape.PointingHandCursor)
-        download.clicked.connect(lambda: self.download_requested.emit(self._url))
-        dismiss.clicked.connect(self.hide)
+        self._label.setWordWrap(True)
+        self._action = icon_button("Download", "download", "primary")
+        self._dismiss = QPushButton("✕")
+        self._dismiss.setObjectName("ghost")
+        self._dismiss.setFixedWidth(36)
+        self._dismiss.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._action.clicked.connect(self._on_action)
+        self._dismiss.clicked.connect(self.hide)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 10, 10, 10)
         layout.addWidget(self._label, stretch=1)
-        layout.addWidget(download)
-        layout.addWidget(dismiss)
+        layout.addWidget(self._action)
+        layout.addWidget(self._dismiss)
         self.hide()
 
-    def show_release(self, version: str, url: str) -> None:
+    def show_release(self, version: str, url: str, automatic: bool) -> None:
         self._url = url
-        self._label.setText(
-            f"<b>ClipTranslator {version.lstrip('v')} is available.</b> "
-            "Download the new installer and run it to update."
-        )
+        self._automatic = automatic
+        name = f"<b>ClipTranslator {version.lstrip('v')} is available.</b> "
+        if automatic:
+            self._label.setText(name + "Update now and the app will reopen when it is done.")
+            self._action.setText("Update now")
+        else:
+            self._label.setText(name + "Download the new installer and run it to update.")
+            self._action.setText("Download")
+        self._set_busy(False)
         self.show()
+
+    def show_progress(self, message: str) -> None:
+        self._label.setText(message)
+        self._set_busy(True)
+        self.show()
+
+    def show_failure(self, message: str) -> None:
+        self._automatic = False
+        self._label.setText(f"<b>The update did not finish.</b> {html.escape(message)}")
+        self._action.setText("Download")
+        self._set_busy(False)
+        self.show()
+
+    def _set_busy(self, busy: bool) -> None:
+        self._action.setEnabled(not busy)
+        self._dismiss.setEnabled(not busy)
+
+    def _on_action(self) -> None:
+        if self._automatic:
+            self.update_requested.emit()
+        else:
+            self.download_requested.emit(self._url)

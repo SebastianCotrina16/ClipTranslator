@@ -8,10 +8,19 @@ _VERSION_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)")
 
 
 @dataclass(frozen=True)
+class Installer:
+    name: str
+    url: str
+    size: int
+    sha256: str
+
+
+@dataclass(frozen=True)
 class Release:
     version: str
     url: str
     notes: str = ""
+    installer: Installer | None = None
 
 
 class ReleaseSource(Protocol):

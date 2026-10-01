@@ -8,13 +8,14 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Signal, Slot
 
 from app.application.pipeline import Pipeline, Stage
-from app.application.updates import newer_release
+from app.application.updates import Installer, newer_release
 from app.bootstrap import create_pipeline
 from app.config.settings import Settings
 from app.domain.subtitle_style import SubtitleStyle
 from app.infrastructure.ffmpeg import burn_subtitles
 from app.infrastructure.github_releases import GitHubReleases, installed_version
 from app.infrastructure.gpu import sustained_utilization
+from app.infrastructure.self_update import download_installer
 from app.infrastructure.subtitle_files import safe_stem
 
 log = logging.getLogger(__name__)
@@ -174,6 +175,26 @@ class ExportVideoJob(QObject):
             self.failed.emit(str(error))
             return
         self.succeeded.emit(output)
+
+
+class UpdateDownloadJob(QObject):
+    progressed = Signal(float)
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, installer: Installer) -> None:
+        super().__init__()
+        self._installer = installer
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            path = download_installer(self._installer, progress=self.progressed.emit)
+        except Exception as error:
+            log.exception("Downloading the update failed")
+            self.failed.emit(str(error))
+            return
+        self.succeeded.emit(path)
 
 
 class UpdateCheckJob(QObject):

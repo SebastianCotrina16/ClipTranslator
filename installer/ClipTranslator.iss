@@ -47,6 +47,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{#AppExe}"; WorkingDir: "{app}"; Ic
 
 [Run]
 Filename: "{#AppExe}"; Description: "Open {#AppName}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+Filename: "{#AppExe}"; WorkingDir: "{app}"; Flags: nowait; Check: ReopenAfterUpdate
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\.venv"
@@ -162,7 +163,7 @@ begin
   Result := '';
   if CountRunningApp() = 0 then
     Exit;
-  if SuppressibleMsgBox('ClipTranslator is open. It will be closed to install the update. Your subtitle edits are already saved.', mbConfirmation, MB_OKCANCEL, IDOK) <> IDOK then
+  if SuppressibleMsgBox('ClipTranslator is open and will be closed to install the update.' + #13#10#13#10 + 'Subtitle edits are saved automatically, but a clip that is still being processed or exported will stop and has to be started again.', mbConfirmation, MB_OKCANCEL, IDOK) <> IDOK then
   begin
     Result := 'Close ClipTranslator and run the installer again.';
     Exit;
@@ -170,6 +171,11 @@ begin
   CloseRunningApp();
   if CountRunningApp() > 0 then
     Result := 'ClipTranslator could not be closed. Close it and run the installer again.';
+end;
+
+function ReopenAfterUpdate(): Boolean;
+begin
+  Result := WizardSilent() and (ExpandConstant('{param:RESTARTAPP|0}') = '1');
 end;
 
 function InitializeUninstall(): Boolean;

@@ -5,7 +5,9 @@ from pathlib import Path
 from PySide6.QtCore import QModelIndex, Qt, QTimer, QUrl
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QAbstractItemDelegate,
     QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -26,11 +28,13 @@ from PySide6.QtWidgets import (
 
 from app.application.pipeline import Pipeline
 from app.application.updates import Release
+from app.config.session import SavedClip, Session, SessionStore
 from app.config.store import SettingsStore
 from app.domain.languages import ENGLISH_NAMES, TARGET_LANGUAGES
 from app.domain.models import Cue
 from app.domain.subtitles import format_for_screen
 from app.infrastructure.ffmpeg import has_video
+from app.infrastructure.self_update import can_update_itself, launch_installer
 from app.presentation.gui.background import BackgroundRunner
 from app.presentation.gui.clip_queue import ClipList, ClipStatus
 from app.presentation.gui.cue_table import Column, CueTableModel
@@ -42,6 +46,7 @@ from app.presentation.gui.job import (
     RetranslateJob,
     SubtitleJob,
     UpdateCheckJob,
+    UpdateDownloadJob,
 )
 from app.presentation.gui.player import SubtitledPlayer
 from app.presentation.gui.setup_dialog import SetupDialog
@@ -54,12 +59,27 @@ SIDEBAR_WIDTH = 370
 PROGRESS_STEPS = 1000
 DEFAULT_SHIFT_SECONDS = 0.25
 JOB_DONE_SIGNALS = ("succeeded", "failed", "cancelled")
+INSTALLER_HANDOFF_MS = 800
+
+
+def restored_status(value: str) -> ClipStatus:
+    try:
+        status = ClipStatus(value)
+    except ValueError:
+        return ClipStatus.PENDING
+    return ClipStatus.PENDING if status is ClipStatus.PROCESSING else status
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, store: SettingsStore | None = None, log_file: Path | None = None) -> None:
+    def __init__(
+        self,
+        store: SettingsStore | None = None,
+        log_file: Path | None = None,
+        session_store: SessionStore | None = None,
+    ) -> None:
         super().__init__()
         self._store = store or SettingsStore()
+        self._session_store = session_store or SessionStore()
         self._first_run = not self._store.path.exists()
         self._settings = self._store.load()
         self._log_file = log_file
@@ -68,6 +88,8 @@ class MainWindow(QMainWindow):
         self._files: list[Path] = []
         self._queue_active = False
         self._queue_total = 0
+        self._release: Release | None = None
+        self._updating = False
         self._runner = BackgroundRunner(self)
         self._update_runner = BackgroundRunner(self)
         self._model = CueTableModel()
@@ -101,6 +123,7 @@ class MainWindow(QMainWindow):
         self._export_video_button = icon_button("Export video", "video")
         self._export_button = icon_button("Export subtitles", "download", "primary")
         self._build()
+        self._restore_session()
 
     def add_media(self, paths: list[Path]) -> None:
         added = self._clips.add(paths)
@@ -323,6 +346,7 @@ class MainWindow(QMainWindow):
         self._table.selectionModel().selectionChanged.connect(lambda *_: self._update_buttons())
         self._runner.finished.connect(self._on_job_finished)
         self._banner.download_requested.connect(lambda url: QDesktopServices.openUrl(QUrl(url)))
+        self._banner.update_requested.connect(self._install_update)
         shortcuts = {
             QKeySequence.StandardKey.Undo: self._model.undo_stack.undo,
             QKeySequence.StandardKey.Redo: self._model.undo_stack.redo,
@@ -353,7 +377,7 @@ class MainWindow(QMainWindow):
             self._start()
 
     def _start(self) -> None:
-        if self._media is None or self._runner.busy:
+        if self._media is None or self._runner.busy or self._updating:
             return
         self._settings.translation.target_language = self._target.currentData()
         self._store.save(self._settings)
@@ -384,6 +408,8 @@ class MainWindow(QMainWindow):
         self._update_buttons()
 
     def _process_all(self) -> None:
+        if self._updating:
+            return
         if self._runner.busy or not self._clips.with_status(ClipStatus.PENDING):
             self._stage.setText("There are no pending clips.")
             return
@@ -604,7 +630,101 @@ class MainWindow(QMainWindow):
         self._update_runner.start(job, ("finished",))
 
     def _show_update(self, release: Release) -> None:
-        self._banner.show_release(release.version, release.url)
+        self._release = release
+        automatic = release.installer is not None and can_update_itself()
+        self._banner.show_release(release.version, release.url, automatic)
+
+    def _install_update(self) -> None:
+        release = self._release
+        if release is None or release.installer is None or self._update_runner.busy:
+            return
+        if self._is_working():
+            QMessageBox.information(
+                self,
+                "Update",
+                "ClipTranslator is still working. Wait until it finishes, "
+                "or cancel it, and then click Update now.",
+            )
+            return
+        answer = QMessageBox.question(
+            self,
+            "Update",
+            "ClipTranslator will close to install the update and then reopen with your "
+            "clips. Your subtitle edits are saved.\n\nUpdate now?",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        job = UpdateDownloadJob(release.installer)
+        job.progressed.connect(
+            lambda fraction: self._banner.show_progress(f"Downloading the update… {fraction:.0%}")
+        )
+        job.succeeded.connect(self._run_installer)
+        job.failed.connect(self._on_update_failed)
+        self._updating = True
+        self._banner.show_progress("Downloading the update…")
+        self._update_runner.start(job, ("succeeded", "failed"))
+        self._update_buttons()
+
+    def _run_installer(self, installer: Path) -> None:
+        if self._is_working():
+            self._on_update_failed("ClipTranslator was busy, so nothing was closed.")
+            return
+        self._finish_editing()
+        try:
+            self._session_store.save(self._current_session())
+            launch_installer(installer)
+        except OSError as error:
+            self._session_store.path.unlink(missing_ok=True)
+            self._on_update_failed(str(error))
+            return
+        self._banner.show_progress("Installing the update. ClipTranslator will reopen in a moment.")
+        QTimer.singleShot(INSTALLER_HANDOFF_MS, self.close)
+
+    def _is_working(self) -> bool:
+        return self._runner.busy or self._queue_active
+
+    def _finish_editing(self) -> None:
+        editor = QApplication.focusWidget()
+        if editor is None or editor is self._table or not self._table.isAncestorOf(editor):
+            return
+        self._table.commitData(editor)
+        self._table.closeEditor(editor, QAbstractItemDelegate.EndEditHint.NoHint)
+
+    def _current_session(self) -> Session:
+        return Session(
+            clips=[
+                SavedClip(str(path), (self._clips.status(path) or ClipStatus.PENDING).value)
+                for path in self._clips.paths()
+            ],
+            current=str(self._media) if self._media else "",
+            source_language=self._source.currentData() or "",
+            context=self._context.text(),
+        )
+
+    def _restore_session(self) -> None:
+        session = self._session_store.take()
+        if session is None:
+            return
+        clips = [clip for clip in session.clips if Path(clip.path).is_file()]
+        self._clips.add([Path(clip.path) for clip in clips])
+        for clip in clips:
+            self._clips.set_status(Path(clip.path), restored_status(clip.status))
+        source = self._source.findData(session.source_language)
+        if source >= 0:
+            self._source.setCurrentIndex(source)
+        self._context.setText(session.context)
+        current = Path(session.current) if session.current else None
+        if current is not None and current.is_file():
+            self.open_media(current)
+            if self._clips.status(current) in (ClipStatus.READY, ClipStatus.EXPORTED):
+                QTimer.singleShot(0, self._start)
+        self._stage.setText("ClipTranslator was updated. Your clips are back where you left them.")
+        self._update_buttons()
+
+    def _on_update_failed(self, message: str) -> None:
+        self._updating = False
+        self._banner.show_failure(message)
+        self._update_buttons()
 
     def _open_folder(self) -> None:
         folder = self._files[0].parent if self._files else None
@@ -672,4 +792,12 @@ class MainWindow(QMainWindow):
         self._export_button.setEnabled(editable)
         media_has_video = self._media is not None and has_video(self._media)
         self._export_video_button.setEnabled(editable and media_has_video)
+        if self._updating:
+            for widget in (
+                self._start_button,
+                self._process_all_button,
+                self._export_video_button,
+                self._settings_button,
+            ):
+                widget.setEnabled(False)
         self._folder_button.setEnabled(self._media is not None)
