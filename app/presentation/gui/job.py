@@ -11,6 +11,7 @@ from app.application.pipeline import Pipeline, Stage
 from app.application.updates import newer_release
 from app.bootstrap import create_pipeline
 from app.config.settings import Settings
+from app.domain.subtitle_style import SubtitleStyle
 from app.infrastructure.ffmpeg import burn_subtitles
 from app.infrastructure.github_releases import GitHubReleases, installed_version
 from app.infrastructure.gpu import sustained_utilization
@@ -147,9 +148,10 @@ class ExportVideoJob(QObject):
     succeeded = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, pipeline: Pipeline) -> None:
+    def __init__(self, pipeline: Pipeline, style: SubtitleStyle) -> None:
         super().__init__()
         self._pipeline = pipeline
+        self._style = style
 
     @Slot()
     def run(self) -> None:
@@ -165,6 +167,7 @@ class ExportVideoJob(QObject):
                 output,
                 self._pipeline.state.duration,
                 self.progressed.emit,
+                self._style,
             )
         except Exception as error:
             log.exception("Exporting the subtitled video failed")

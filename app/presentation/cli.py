@@ -104,7 +104,8 @@ def process(pipeline: Pipeline, args: argparse.Namespace) -> list[Path]:
     if args.burn:
         print("Burning subtitles into the video...")
         burned = files[0].with_name(f"{files[0].stem.rsplit('.', 1)[0]}.subtitled.mp4")
-        files.append(burn_subtitles(pipeline.state.media, files[0], burned))
+        style = pipeline.settings.video.style()
+        files.append(burn_subtitles(pipeline.state.media, files[0], burned, style=style))
     return files
 
 

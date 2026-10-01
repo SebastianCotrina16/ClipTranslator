@@ -28,6 +28,8 @@ from app.application.pipeline import Pipeline
 from app.application.updates import Release
 from app.config.store import SettingsStore
 from app.domain.languages import ENGLISH_NAMES, TARGET_LANGUAGES
+from app.domain.models import Cue
+from app.domain.subtitles import format_for_screen
 from app.infrastructure.ffmpeg import has_video
 from app.presentation.gui.background import BackgroundRunner
 from app.presentation.gui.clip_queue import ClipList, ClipStatus
@@ -44,6 +46,7 @@ from app.presentation.gui.job import (
 from app.presentation.gui.player import SubtitledPlayer
 from app.presentation.gui.setup_dialog import SetupDialog
 from app.presentation.gui.texts import MEDIA_FILTER, language_name, stage_label
+from app.presentation.gui.video_style_dialog import VideoStyleDialog
 from app.presentation.gui.widgets import NoticeBox, UpdateBanner, card, icon_button, section_label
 
 WINDOW_SIZE = (1400, 900)
@@ -538,7 +541,18 @@ class MainWindow(QMainWindow):
     def _export_video(self) -> None:
         if self._pipeline is None or self._runner.busy:
             return
-        job = ExportVideoJob(self._pipeline)
+        sample = self._preview_cue()
+        seconds = (sample.start + sample.end) / 2 if sample else self._player.position()
+        text = format_for_screen(sample.translation, self._pipeline.cue_rules) if sample else ""
+        dialog = VideoStyleDialog(
+            self._pipeline.state.media, seconds, text, self._settings.video.style(), self
+        )
+        if not dialog.exec():
+            return
+        style = dialog.style()
+        self._settings.video.remember(style)
+        self._store.save(self._settings)
+        job = ExportVideoJob(self._pipeline, style)
         job.progressed.connect(
             lambda fraction: self._set_progress(
                 fraction, f"Creating the subtitled video… {fraction:.0%}"
@@ -549,6 +563,14 @@ class MainWindow(QMainWindow):
         self._set_progress(0.0, "Creating the subtitled video…")
         self._runner.start(job, ("succeeded", "failed"))
         self._update_buttons()
+
+    def _preview_cue(self) -> Cue | None:
+        rows = self._selected_rows()
+        cue = self._model.cue_at(rows[0]) if rows else None
+        if cue is not None and cue.translation:
+            return cue
+        cues = self._pipeline.state.cues if self._pipeline else []
+        return next((cue for cue in cues if cue.translation), None)
 
     def _on_video_exported(self, output: Path) -> None:
         self._files = [output]

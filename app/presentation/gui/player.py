@@ -62,6 +62,9 @@ class SubtitledPlayer(QWidget):
         self._show_original = enabled
         self.refresh_caption()
 
+    def position(self) -> float:
+        return self._player.position() / 1000
+
     def seek(self, seconds: float) -> None:
         self._player.setPosition(int(seconds * 1000))
 

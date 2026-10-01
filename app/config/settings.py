@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config.prompts import translation_prompt_for
+from app.domain.subtitle_style import SubtitleStyle
 
 ANTHROPIC_KEY_VARIABLE = "ANTHROPIC_API_KEY"
 OPENAI_KEY_VARIABLE = "OPENAI_API_KEY"
@@ -66,6 +67,27 @@ class SubtitleSettings:
 
 
 @dataclass
+class VideoSettings:
+    text_color: str = SubtitleStyle.text_color
+    background: str = SubtitleStyle.background.value
+    box_opacity: int = SubtitleStyle.box_opacity
+    font_size: int = SubtitleStyle.font_size
+    position: str = SubtitleStyle.position.value
+
+    def style(self) -> SubtitleStyle:
+        return SubtitleStyle.from_values(
+            self.text_color, self.background, self.box_opacity, self.font_size, self.position
+        )
+
+    def remember(self, style: SubtitleStyle) -> None:
+        self.text_color = style.text_color
+        self.background = style.background.value
+        self.box_opacity = style.box_opacity
+        self.font_size = style.font_size
+        self.position = style.position.value
+
+
+@dataclass
 class PerformanceSettings:
     low_impact: bool = True
     cpu_threads: int = 0
@@ -87,6 +109,7 @@ class Settings:
     translation: TranslationSettings = field(default_factory=TranslationSettings)
     subtitles: SubtitleSettings = field(default_factory=SubtitleSettings)
     performance: PerformanceSettings = field(default_factory=PerformanceSettings)
+    video: VideoSettings = field(default_factory=VideoSettings)
     work_dir: str = ""
     check_for_updates: bool = True
 
@@ -94,7 +117,14 @@ class Settings:
         return Path(self.work_dir) if self.work_dir else default
 
 
-SECTION_NAMES = ("transcription", "separation", "translation", "subtitles", "performance")
+SECTION_NAMES = (
+    "transcription",
+    "separation",
+    "translation",
+    "subtitles",
+    "performance",
+    "video",
+)
 SECRET_FIELDS = {"anthropic_api_key", "openai_api_key"}
 
 

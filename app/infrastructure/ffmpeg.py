@@ -10,6 +10,8 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from app.domain.subtitle_formats import timestamp
+from app.domain.subtitle_style import SubtitleStyle, force_style
 from app.infrastructure.process import HIDDEN_WINDOW, run_hidden
 
 SPEECH_SAMPLE_RATE = 16_000
@@ -89,7 +91,7 @@ class FfmpegAudio:
         return info.frames / info.samplerate
 
 
-BURNED_SUBTITLE_STYLE = "FontName=Segoe UI,FontSize=20,Bold=1,Outline=2,Shadow=0,MarginV=28"
+PREVIEW_SECONDS = 60.0
 AUDIO_ONLY_SUFFIXES = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".opus"}
 PROGRESS_KEYS = ("out_time_us=", "out_time_ms=")
 
@@ -104,8 +106,8 @@ def burn_subtitles(
     output: Path,
     duration: float | None = None,
     progress: Callable[[float], None] | None = None,
+    style: SubtitleStyle | None = None,
 ) -> Path:
-    escaped = subtitles.resolve().as_posix().replace(":", r"\:").replace("'", r"\'")
     command = [
         ffmpeg_executable(),
         "-hide_banner",
@@ -115,7 +117,7 @@ def burn_subtitles(
         "-i",
         str(media),
         "-vf",
-        f"subtitles='{escaped}':force_style='{BURNED_SUBTITLE_STYLE}'",
+        subtitle_filter(subtitles, style or SubtitleStyle()),
         "-c:v",
         "libx264",
         "-crf",
@@ -146,6 +148,35 @@ def burn_subtitles(
             raise FfmpegError(f"ffmpeg failed: {detail[-500:]}")
     if progress:
         progress(1.0)
+    return output
+
+
+def subtitle_filter(subtitles: Path, style: SubtitleStyle) -> str:
+    escaped = subtitles.resolve().as_posix().replace(":", r"\:").replace("'", r"\'")
+    return f"subtitles='{escaped}':force_style='{force_style(style)}'"
+
+
+def render_preview(
+    media: Path, seconds: float, text: str, style: SubtitleStyle, output: Path
+) -> Path:
+    subtitles = output.with_suffix(".srt")
+    cue = f"1\n{timestamp(0.0)} --> {timestamp(PREVIEW_SECONDS)}\n{text}\n"
+    subtitles.write_text(cue, encoding="utf-8")
+    run_ffmpeg(
+        [
+            "-ss",
+            f"{max(seconds, 0.0):.3f}",
+            "-i",
+            str(media),
+            "-frames:v",
+            "1",
+            "-vf",
+            subtitle_filter(subtitles, style),
+            "-update",
+            "1",
+            str(output),
+        ]
+    )
     return output
 
 

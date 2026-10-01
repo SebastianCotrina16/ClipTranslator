@@ -38,7 +38,7 @@ Clone the repository and double-click `ClipTranslator.bat`. It installs everythi
 3. Optionally add some context about the clip to improve the translation.
 4. Click **Generate subtitles** for the selected clip, or **Process all** to subtitle and export every clip in the list.
 5. Review the result: click a line to jump to that moment in the player. Double-click any text or time to edit it, move lines **Earlier** or **Later**, and undo with **Ctrl+Z**. Edits are saved automatically.
-6. Click **Export subtitles**, or **Export video** to get a copy of the video with the subtitles burned in.
+6. Click **Export subtitles**, or **Export video** to get a copy of the video with the subtitles burned in. Before exporting you can choose the text color, a semi-transparent background box, the size and the position, with a live preview.
 
 The app tells you when a new version is available.
 

@@ -97,6 +97,81 @@ begin
   end;
 end;
 
+function RunningAppProcesses(): Variant;
+var
+  Locator, Service: Variant;
+begin
+  Locator := CreateOleObject('WbemScripting.SWbemLocator');
+  Service := Locator.ConnectServer('.', 'root\CIMV2');
+  Result := Service.ExecQuery('SELECT * FROM Win32_Process WHERE Name = ''cliptranslator-app.exe'' OR Name = ''cliptranslator.exe'' OR Name = ''python.exe'' OR Name = ''pythonw.exe''');
+end;
+
+function IsInsideApp(Process: Variant): Boolean;
+var
+  Path: String;
+begin
+  Result := False;
+  if VarIsNull(Process.ExecutablePath) then
+    Exit;
+  Path := Lowercase(Process.ExecutablePath);
+  Result := Pos(Lowercase(AddBackslash(ExpandConstant('{app}'))), Path) = 1;
+end;
+
+function CountRunningApp(): Integer;
+var
+  Processes: Variant;
+  Index: Integer;
+begin
+  Result := 0;
+  try
+    Processes := RunningAppProcesses();
+    for Index := 0 to Processes.Count - 1 do
+      if IsInsideApp(Processes.ItemIndex(Index)) then
+        Result := Result + 1;
+  except
+    Result := 0;
+  end;
+end;
+
+procedure CloseRunningApp();
+var
+  Processes, Process: Variant;
+  Index: Integer;
+begin
+  try
+    Processes := RunningAppProcesses();
+    for Index := 0 to Processes.Count - 1 do
+    begin
+      Process := Processes.ItemIndex(Index);
+      if IsInsideApp(Process) then
+        Process.Terminate();
+    end;
+  except
+  end;
+  Sleep(1500);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if CountRunningApp() = 0 then
+    Exit;
+  if SuppressibleMsgBox('ClipTranslator is open. It will be closed to install the update. Your subtitle edits are already saved.', mbConfirmation, MB_OKCANCEL, IDOK) <> IDOK then
+  begin
+    Result := 'Close ClipTranslator and run the installer again.';
+    Exit;
+  end;
+  CloseRunningApp();
+  if CountRunningApp() > 0 then
+    Result := 'ClipTranslator could not be closed. Close it and run the installer again.';
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  CloseRunningApp();
+  Result := True;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
