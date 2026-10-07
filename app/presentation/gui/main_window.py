@@ -579,7 +579,7 @@ class MainWindow(QMainWindow):
         if self._pipeline is None:
             return
         try:
-            self._files = self._pipeline.export()
+            self._files = self._pipeline.export(extras=False)
         except OSError as error:
             if quiet:
                 self._notices.add(f"{self._pipeline.state.media.name}: {error}")
@@ -599,23 +599,32 @@ class MainWindow(QMainWindow):
         sample = self._preview_cue()
         seconds = (sample.start + sample.end) / 2 if sample else self._player.position()
         text = format_for_screen(sample.translation, self._pipeline.cue_rules) if sample else ""
+        video = self._settings.video
         dialog = VideoStyleDialog(
-            self._pipeline.state.media, seconds, text, self._settings.video.style(), self
+            self._pipeline.state.media,
+            seconds,
+            text,
+            video.style(),
+            self,
+            video.burn_subtitles,
+            video.remove_music,
         )
         if not dialog.exec():
             return
         style = dialog.style()
-        self._settings.video.remember(style)
+        video.remember(style)
+        video.burn_subtitles = dialog.burn_subtitles()
+        video.remove_music = dialog.remove_music()
         self._store.save(self._settings)
-        job = ExportVideoJob(self._pipeline, style)
+        job = ExportVideoJob(
+            self._pipeline, style if video.burn_subtitles else None, video.remove_music
+        )
         job.progressed.connect(
-            lambda fraction: self._set_progress(
-                fraction, f"Creating the subtitled video… {fraction:.0%}"
-            )
+            lambda fraction: self._set_progress(fraction, f"Creating the video… {fraction:.0%}")
         )
         job.succeeded.connect(self._on_video_exported)
         job.failed.connect(self._show_error)
-        self._set_progress(0.0, "Creating the subtitled video…")
+        self._set_progress(0.0, "Creating the video…")
         self._runner.start(job, ("succeeded", "failed"))
         self._update_buttons()
 

@@ -73,6 +73,8 @@ class VideoSettings:
     box_opacity: int = SubtitleStyle.box_opacity
     font_size: int = SubtitleStyle.font_size
     position: str = SubtitleStyle.position.value
+    burn_subtitles: bool = True
+    remove_music: bool = False
 
     def style(self) -> SubtitleStyle:
         return SubtitleStyle.from_values(

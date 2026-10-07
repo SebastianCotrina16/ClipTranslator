@@ -86,4 +86,5 @@ class SubtitleWriter(Protocol):
         target_language: str,
         output_dir: Path | None,
         vtt: bool,
+        extras: bool,
     ) -> list[Path]: ...

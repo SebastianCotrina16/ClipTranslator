@@ -4,7 +4,7 @@ from pathlib import Path
 
 from app.domain.models import Cue
 from app.domain.subtitle_formats import Track, clock, timestamp, to_srt, to_transcript, to_vtt
-from app.infrastructure.subtitle_files import SubtitleFileWriter, safe_stem
+from app.infrastructure.subtitle_files import SubtitleFileWriter, safe_stem, video_name
 
 
 def sample_cues() -> list[Cue]:
@@ -110,3 +110,18 @@ def test_writer_same_language_writes_only_target_and_transcript(tmp_path: Path) 
 def test_safe_stem_removes_path_and_reserved_characters() -> None:
     assert safe_stem('a<b>:c"d|e?f*g') == "a_b__c_d_e_f_g"
     assert safe_stem("..") == "clip"
+
+
+def test_writer_can_write_only_the_translation(tmp_path: Path) -> None:
+    files = SubtitleFileWriter().write(
+        sample_cues(), tmp_path / "clip.mp4", "fr", "en", extras=False
+    )
+    assert [f.name for f in files] == ["clip.en.srt"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["clip.en.srt"]
+
+
+def test_video_names_say_what_was_done() -> None:
+    clip = Path("folder/clip.mkv")
+    assert video_name(clip, True, False) == "clip.subtitled.mp4"
+    assert video_name(clip, False, True) == "clip.no-music.mp4"
+    assert video_name(clip, True, True) == "clip.subtitled.no-music.mp4"

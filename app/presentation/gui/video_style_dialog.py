@@ -11,6 +11,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
+    QCheckBox,
     QColorDialog,
     QComboBox,
     QDialog,
@@ -44,6 +45,8 @@ BACKGROUNDS = {
     "Black outline": Background.OUTLINE,
 }
 POSITIONS = {"Bottom": Position.BOTTOM, "Top": Position.TOP}
+MUSIC_NOTE = "Keeps only the voices. Songs with singing may stay, and game sounds are removed too."
+NOTHING_CHOSEN = "Choose subtitles, removing the music, or both."
 
 
 class PreviewRender(QObject):
@@ -79,6 +82,8 @@ class VideoStyleDialog(QDialog):
         text: str,
         style: SubtitleStyle,
         parent: QWidget | None = None,
+        burn_subtitles: bool = True,
+        remove_music: bool = False,
     ) -> None:
         super().__init__(parent)
         self._media = media
@@ -91,6 +96,10 @@ class VideoStyleDialog(QDialog):
         self._latest = 0
         self._rendering: PreviewRender | None = None
         self._text_color = style.text_color
+        self._subtitles = QCheckBox("Add the subtitles to the video")
+        self._no_music = QCheckBox("Remove the background music")
+        self._music_note = QLabel(MUSIC_NOTE)
+        self._style_box = QWidget()
         self._color = QComboBox()
         self._background = QComboBox()
         self._opacity = QSlider(Qt.Orientation.Horizontal)
@@ -105,8 +114,16 @@ class VideoStyleDialog(QDialog):
         )
         self._build()
         self._show_style(style)
+        self._subtitles.setChecked(burn_subtitles)
+        self._no_music.setChecked(remove_music)
         self._connect()
         self._refresh()
+
+    def burn_subtitles(self) -> bool:
+        return self._subtitles.isChecked()
+
+    def remove_music(self) -> bool:
+        return self._no_music.isChecked()
 
     def style(self) -> SubtitleStyle:
         return SubtitleStyle(
@@ -129,6 +146,8 @@ class VideoStyleDialog(QDialog):
         self._preview.setStyleSheet("background: #000; border-radius: 8px; color: #aaa;")
         self._status.setObjectName("muted")
         self._status.setWordWrap(True)
+        self._music_note.setObjectName("muted")
+        self._music_note.setWordWrap(True)
         self._opacity.setRange(0, 100)
         self._opacity.setSingleStep(5)
         self._opacity_value.setFixedWidth(44)
@@ -149,7 +168,8 @@ class VideoStyleDialog(QDialog):
         opacity_row = QHBoxLayout()
         opacity_row.addWidget(self._opacity, stretch=1)
         opacity_row.addWidget(self._opacity_value)
-        form = QFormLayout()
+        form = QFormLayout(self._style_box)
+        form.setContentsMargins(24, 0, 0, 0)
         form.addRow("Text color", self._color)
         form.addRow("Background", self._background)
         form.addRow("Box opacity", opacity_row)
@@ -159,7 +179,10 @@ class VideoStyleDialog(QDialog):
         layout.setSpacing(14)
         layout.addWidget(self._preview, alignment=Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(self._status)
-        layout.addLayout(form)
+        layout.addWidget(self._subtitles)
+        layout.addWidget(self._style_box)
+        layout.addWidget(self._no_music)
+        layout.addWidget(self._music_note)
         layout.addWidget(self._buttons)
 
     def _show_style(self, style: SubtitleStyle) -> None:
@@ -180,6 +203,8 @@ class VideoStyleDialog(QDialog):
         for combo in (self._background, self._size, self._position):
             combo.currentIndexChanged.connect(self._refresh)
         self._opacity.valueChanged.connect(self._refresh)
+        self._subtitles.toggled.connect(self._refresh)
+        self._no_music.toggled.connect(self._update_export_button)
         self._timer.timeout.connect(self._render)
 
     def _on_color_chosen(self, index: int) -> None:
@@ -204,9 +229,19 @@ class VideoStyleDialog(QDialog):
 
     def _refresh(self) -> None:
         box = self._background.currentData() == Background.BOX.value
+        self._style_box.setEnabled(self.burn_subtitles())
         self._opacity.setEnabled(box)
         self._opacity_value.setText(f"{self._opacity.value()}%")
+        self._update_export_button()
         self._timer.start()
+
+    def _update_export_button(self) -> None:
+        chosen = self.burn_subtitles() or self.remove_music()
+        self._buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(chosen)
+        if not chosen:
+            self._status.setText(NOTHING_CHOSEN)
+        elif self._status.text() == NOTHING_CHOSEN:
+            self._status.setText("")
 
     def _render(self) -> None:
         if self._rendering is not None:
@@ -215,9 +250,8 @@ class VideoStyleDialog(QDialog):
         number = next(self._numbers)
         self._latest = number
         output = Path(self._folder.name) / f"preview-{number}.png"
-        render = partial(
-            render_preview, self._media, self._seconds, self._text, self.style(), output
-        )
+        style = self.style() if self.burn_subtitles() else None
+        render = partial(render_preview, self._media, self._seconds, self._text, style, output)
         job = PreviewRender(number, render)
         job.rendered.connect(self._on_rendered)
         job.failed.connect(self._on_failed)
@@ -236,7 +270,8 @@ class VideoStyleDialog(QDialog):
                 Qt.TransformationMode.SmoothTransformation,
             )
         )
-        self._status.setText("Preview on a frame of your video.")
+        if self.burn_subtitles() or self.remove_music():
+            self._status.setText("Preview on a frame of your video.")
 
     def _on_failed(self, number: int, message: str) -> None:
         self._rendering = None

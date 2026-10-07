@@ -94,6 +94,8 @@ class FfmpegAudio:
 PREVIEW_SECONDS = 60.0
 AUDIO_ONLY_SUFFIXES = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".opus"}
 PROGRESS_KEYS = ("out_time_us=", "out_time_ms=")
+REENCODE = ["-c:v", "libx264", "-crf", "18", "-preset", "medium"]
+CLEAN_AUDIO = ["-c:a", "aac", "-b:a", "192k"]
 
 
 def has_video(media: Path) -> bool:
@@ -108,29 +110,45 @@ def burn_subtitles(
     progress: Callable[[float], None] | None = None,
     style: SubtitleStyle | None = None,
 ) -> Path:
-    command = [
-        ffmpeg_executable(),
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-i",
-        str(media),
-        "-vf",
-        subtitle_filter(subtitles, style or SubtitleStyle()),
-        "-c:v",
-        "libx264",
-        "-crf",
-        "18",
-        "-preset",
-        "medium",
-        "-c:a",
-        "copy",
-        "-progress",
-        "pipe:1",
-        "-nostats",
-        str(output),
-    ]
+    return render_video(media, output, subtitles, style, None, duration, progress)
+
+
+def render_video(
+    media: Path,
+    output: Path,
+    subtitles: Path | None = None,
+    style: SubtitleStyle | None = None,
+    audio: Path | None = None,
+    duration: float | None = None,
+    progress: Callable[[float], None] | None = None,
+) -> Path:
+    if subtitles is not None:
+        video = ["-vf", subtitle_filter(subtitles, style or SubtitleStyle()), *REENCODE]
+    else:
+        video = ["-c:v", "copy"]
+    try:
+        _run_with_progress(_video_command(media, output, video, audio), duration, progress)
+    except FfmpegError:
+        if subtitles is not None:
+            raise
+        _run_with_progress(_video_command(media, output, REENCODE, audio), duration, progress)
+    return output
+
+
+def _video_command(media: Path, output: Path, video: list[str], audio: Path | None) -> list[str]:
+    command = [ffmpeg_executable(), "-hide_banner", "-loglevel", "error", "-y", "-i", str(media)]
+    if audio is None:
+        command += [*video, "-c:a", "copy"]
+    else:
+        command += ["-i", str(audio), "-map", "0:v:0", "-map", "1:a:0", *video, *CLEAN_AUDIO]
+    return [*command, "-progress", "pipe:1", "-nostats", str(output)]
+
+
+def _run_with_progress(
+    command: list[str],
+    duration: float | None,
+    progress: Callable[[float], None] | None,
+) -> None:
     with tempfile.TemporaryFile() as errors:
         process = subprocess.Popen(
             command, stdout=subprocess.PIPE, stderr=errors, text=True, creationflags=HIDDEN_WINDOW
@@ -148,7 +166,6 @@ def burn_subtitles(
             raise FfmpegError(f"ffmpeg failed: {detail[-500:]}")
     if progress:
         progress(1.0)
-    return output
 
 
 def subtitle_filter(subtitles: Path, style: SubtitleStyle) -> str:
@@ -157,11 +174,14 @@ def subtitle_filter(subtitles: Path, style: SubtitleStyle) -> str:
 
 
 def render_preview(
-    media: Path, seconds: float, text: str, style: SubtitleStyle, output: Path
+    media: Path, seconds: float, text: str, style: SubtitleStyle | None, output: Path
 ) -> Path:
-    subtitles = output.with_suffix(".srt")
-    cue = f"1\n{timestamp(0.0)} --> {timestamp(PREVIEW_SECONDS)}\n{text}\n"
-    subtitles.write_text(cue, encoding="utf-8")
+    overlay: list[str] = []
+    if style is not None:
+        subtitles = output.with_suffix(".srt")
+        cue = f"1\n{timestamp(0.0)} --> {timestamp(PREVIEW_SECONDS)}\n{text}\n"
+        subtitles.write_text(cue, encoding="utf-8")
+        overlay = ["-vf", subtitle_filter(subtitles, style)]
     run_ffmpeg(
         [
             "-ss",
@@ -170,8 +190,7 @@ def render_preview(
             str(media),
             "-frames:v",
             "1",
-            "-vf",
-            subtitle_filter(subtitles, style),
+            *overlay,
             "-update",
             "1",
             str(output),

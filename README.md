@@ -38,7 +38,11 @@ Clone the repository and double-click `ClipTranslator.bat`. It installs everythi
 3. Optionally add some context about the clip to improve the translation.
 4. Click **Generate subtitles** for the selected clip, or **Process all** to subtitle and export every clip in the list.
 5. Review the result: click a line to jump to that moment in the player. Double-click any text or time to edit it, move lines **Earlier** or **Later**, and undo with **Ctrl+Z**. When two models heard a part differently, click **Versions** to compare them and pick the one that makes sense. Edits are saved automatically.
-6. Click **Export subtitles**, or **Export video** to get a copy of the video with the subtitles burned in. Before exporting you can choose the text color, a semi-transparent background box, the size and the position, with a live preview.
+6. Click **Export subtitles** to save the translated `.srt` next to the video, ready to import into CapCut, Premiere or DaVinci Resolve as its own subtitle layer. Or click **Export video** to get a copy of the video where you choose:
+   - **Add the subtitles to the video**: burns them into the picture, with your choice of text color, a semi-transparent background box, size and position, and a live preview.
+   - **Remove the background music**: keeps only the voices. Songs with singing may stay, and game sounds are removed too.
+
+   Turn off the subtitles and keep music removal on to get a music-free video for your editor, then add the `.srt` on top.
 
 When a new version is available, click **Update now**: the app downloads it, checks that it is genuine, installs it and reopens with your clips. Wait until it finishes working before updating; your subtitle edits are always saved.
 
@@ -64,10 +68,10 @@ Run `--help` to see every option.
 
 Next to the video:
 
-- `video.<target>.srt`: translated subtitles.
-- `video.<source>.srt`: original subtitles.
-- `video.bilingual.srt`: both languages.
-- `video.transcript.txt`: easy-to-read transcript with timestamps.
+- `video.<target>.srt`: translated subtitles (**Export subtitles**).
+- `video.subtitled.mp4`, `video.no-music.mp4` or `video.subtitled.no-music.mp4` (**Export video**).
+
+The command line also writes `video.<source>.srt` (original), `video.bilingual.srt` (both languages) and `video.transcript.txt` (easy-to-read transcript).
 
 ## Support
 

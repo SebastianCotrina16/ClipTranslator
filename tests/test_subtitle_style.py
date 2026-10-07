@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QDialogButtonBox
 
 from app.config.store import SettingsStore
 from app.domain.subtitle_style import (
@@ -15,7 +15,7 @@ from app.domain.subtitle_style import (
     ass_color,
     force_style,
 )
-from app.infrastructure.ffmpeg import ffmpeg_executable, render_preview
+from app.infrastructure.ffmpeg import ffmpeg_executable, render_preview, render_video
 from app.presentation.gui.video_style_dialog import VideoStyleDialog
 
 
@@ -106,4 +106,54 @@ def test_style_dialog_returns_the_chosen_style(
 ) -> None:
     dialog = VideoStyleDialog(sample_video, 1.0, "", chosen)
     assert dialog.style() == chosen
+    dialog.reject()
+
+
+def make_media(target: Path, *sources: str) -> Path:
+    inputs = [part for source in sources for part in ("-f", "lavfi", "-i", source)]
+    command = [ffmpeg_executable(), "-hide_banner", "-loglevel", "error", *inputs, "-t", "2"]
+    subprocess.run([*command, str(target)], check=True)
+    return target
+
+
+def streams(media: Path) -> str:
+    probe = subprocess.run(
+        [ffmpeg_executable(), "-hide_banner", "-i", str(media)], capture_output=True, text=True
+    )
+    return probe.stderr
+
+
+def test_video_can_get_voice_only_audio_without_subtitles(tmp_path: Path) -> None:
+    clip = make_media(tmp_path / "clip.mp4", "color=c=blue:s=320x180:d=2", "sine=f=440:d=2")
+    voices = make_media(tmp_path / "voices.wav", "sine=f=220:d=2")
+    output = render_video(clip, tmp_path / "clip.no-music.mp4", audio=voices)
+    found = streams(output)
+    assert "Video: h264" in found
+    assert "Audio: aac" in found
+
+
+def test_video_with_subtitles_and_voice_only_audio(tmp_path: Path) -> None:
+    clip = make_media(tmp_path / "clip.mp4", "color=c=blue:s=320x180:d=2", "sine=f=440:d=2")
+    voices = make_media(tmp_path / "voices.wav", "sine=f=220:d=2")
+    subtitles = tmp_path / "clip.en.srt"
+    subtitles.write_text("1\n00:00:00,000 --> 00:00:02,000\nHello\n", encoding="utf-8")
+    output = render_video(clip, tmp_path / "out.mp4", subtitles, SubtitleStyle(), voices)
+    assert "Audio: aac" in streams(output)
+
+
+def test_preview_without_subtitles(sample_video: Path, tmp_path: Path) -> None:
+    output = render_preview(sample_video, 1.0, "", None, tmp_path / "plain.png")
+    assert output.stat().st_size > 0
+
+
+def test_export_needs_subtitles_or_music_removal(qt_app: QApplication, sample_video: Path) -> None:
+    dialog = VideoStyleDialog(sample_video, 1.0, "", SubtitleStyle(), None, True, True)
+    export = dialog._buttons.button(QDialogButtonBox.StandardButton.Ok)
+    dialog._subtitles.setChecked(False)
+    assert export.isEnabled()
+    assert (dialog.burn_subtitles(), dialog.remove_music()) == (False, True)
+    dialog._no_music.setChecked(False)
+    assert not export.isEnabled()
+    dialog._subtitles.setChecked(True)
+    assert export.isEnabled()
     dialog.reject()

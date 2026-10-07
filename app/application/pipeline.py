@@ -13,6 +13,7 @@ from app.application.edits import EditStore
 from app.application.language_detection import LanguageDetector
 from app.application.ports import (
     AudioTools,
+    FractionCallback,
     LanguageModel,
     LanguageModelError,
     SpeechDetector,
@@ -241,6 +242,23 @@ class Pipeline:
         self.state.backends["separation"] = f"{separation.model} ({data.get('device', '?')})"
         self.state.speech_audio = work / data["wav"]
         return self.state.speech_audio
+
+    def voice_audio(self, progress: FractionCallback | None = None) -> Path:
+        vocals = self.state.work_dir / "vocals_44k.wav"
+        if vocals.is_file():
+            return vocals
+        audio = self.services.audio
+        stereo = audio.extract(
+            self.state.media,
+            self.state.work_dir / "audio_44k.wav",
+            audio.separation_sample_rate,
+            2,
+        )
+        try:
+            result = self.services.create_separator().separate(stereo, vocals, progress)
+        finally:
+            stereo.unlink(missing_ok=True)
+        return result.vocals
 
     def detect_language(self) -> LanguageDetection:
         speech_audio = self._speech_audio()
@@ -471,7 +489,9 @@ class Pipeline:
         self.state.keys.pop(Stage.CUES, None)
         return self.build_cues()
 
-    def export(self, output_dir: Path | None = None, vtt: bool = False) -> list[Path]:
+    def export(
+        self, output_dir: Path | None = None, vtt: bool = False, extras: bool = True
+    ) -> list[Path]:
         if not self.state.cues:
             self.build_cues()
         self.progress(Stage.EXPORT, 0.0, STAGE_LABELS[Stage.EXPORT])
@@ -482,6 +502,7 @@ class Pipeline:
             self.settings.translation.target_language,
             output_dir,
             vtt,
+            extras,
         )
         self.progress(Stage.EXPORT, 1.0, STAGE_LABELS[Stage.EXPORT])
         self._append_run_log(files)

@@ -12,15 +12,16 @@ from app.application.updates import Installer, newer_release
 from app.bootstrap import create_pipeline
 from app.config.settings import Settings
 from app.domain.subtitle_style import SubtitleStyle
-from app.infrastructure.ffmpeg import burn_subtitles
+from app.infrastructure.ffmpeg import render_video
 from app.infrastructure.github_releases import GitHubReleases, installed_version
 from app.infrastructure.gpu import sustained_utilization
 from app.infrastructure.self_update import download_installer
-from app.infrastructure.subtitle_files import safe_stem
+from app.infrastructure.subtitle_files import video_name
 
 log = logging.getLogger(__name__)
 
 BUSY_GPU_PERCENT = 50
+MUSIC_REMOVAL_SHARE = 0.5
 STAGE_ORDER = [
     Stage.AUDIO,
     Stage.SEPARATION,
@@ -149,29 +150,38 @@ class ExportVideoJob(QObject):
     succeeded = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, pipeline: Pipeline, style: SubtitleStyle) -> None:
+    def __init__(
+        self, pipeline: Pipeline, style: SubtitleStyle | None, remove_music: bool = False
+    ) -> None:
         super().__init__()
         self._pipeline = pipeline
         self._style = style
+        self._remove_music = remove_music
 
     @Slot()
     def run(self) -> None:
         try:
-            files = self._pipeline.export()
-            subtitles = files[0]
-            output = subtitles.with_name(
-                f"{safe_stem(self._pipeline.state.media.stem)}.subtitled.mp4"
-            )
-            burn_subtitles(
-                self._pipeline.state.media,
-                subtitles,
+            media = self._pipeline.state.media
+            output = media.with_name(video_name(media, self._style is not None, self._remove_music))
+            subtitles = self._pipeline.export(extras=False)[0] if self._style is not None else None
+            audio = None
+            start = 0.0
+            if self._remove_music:
+                start = MUSIC_REMOVAL_SHARE
+                audio = self._pipeline.voice_audio(
+                    lambda fraction: self.progressed.emit(start * fraction)
+                )
+            render_video(
+                media,
                 output,
-                self._pipeline.state.duration,
-                self.progressed.emit,
+                subtitles,
                 self._style,
+                audio,
+                self._pipeline.state.duration,
+                lambda fraction: self.progressed.emit(start + (1.0 - start) * fraction),
             )
         except Exception as error:
-            log.exception("Exporting the subtitled video failed")
+            log.exception("Exporting the video failed")
             self.failed.emit(str(error))
             return
         self.succeeded.emit(output)

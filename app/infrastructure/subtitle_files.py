@@ -16,6 +16,13 @@ def safe_stem(name: str) -> str:
     return cleaned or "clip"
 
 
+def video_name(media: Path, subtitled: bool, without_music: bool) -> str:
+    tags = [
+        tag for tag, wanted in (("subtitled", subtitled), ("no-music", without_music)) if wanted
+    ]
+    return ".".join([safe_stem(media.stem), *tags, "mp4"])
+
+
 class SubtitleFileWriter:
     def __init__(self, rules: CueRules | None = None) -> None:
         self.rules = rules or CueRules()
@@ -28,6 +35,7 @@ class SubtitleFileWriter:
         target_language: str,
         output_dir: Path | None = None,
         vtt: bool = False,
+        extras: bool = True,
     ) -> list[Path]:
         folder = output_dir or media.parent
         folder.mkdir(parents=True, exist_ok=True)
@@ -36,7 +44,7 @@ class SubtitleFileWriter:
         tracks: list[tuple[Path, Track]] = [
             (folder / f"{stem}.{target_language}.srt", Track.TRANSLATION)
         ]
-        if source_language != target_language:
+        if extras and source_language != target_language:
             tracks.append((folder / f"{stem}.{source_language}.srt", Track.ORIGINAL))
             tracks.append((folder / f"{stem}.{vocabulary.bilingual}.srt", Track.BILINGUAL))
         written: list[Path] = []
@@ -47,6 +55,8 @@ class SubtitleFileWriter:
                 vtt_path = path.with_suffix(".vtt")
                 vtt_path.write_text(to_vtt(cues, track, self.rules), encoding="utf-8")
                 written.append(vtt_path)
+        if not extras:
+            return written
         transcript = folder / f"{stem}.{vocabulary.transcript}.txt"
         transcript.write_text(
             to_transcript(cues, source_language, target_language), encoding=SUBTITLE_ENCODING
