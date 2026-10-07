@@ -53,6 +53,7 @@ _STROKE_ICONS = {
     "video": '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/>',
     "plus": '<path d="M12 5v14M5 12h14"/>',
     "queue": '<path d="M4 6h16M4 12h16M4 18h10"/>',
+    "report": '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v6M12 16.5v.5"/>',
 }
 
 

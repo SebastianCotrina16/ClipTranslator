@@ -21,6 +21,7 @@ class TranscriptionSettings:
     vad: bool = True
     hallucination_silence_threshold: float = 2.0
     initial_prompt: str = "Gartic Phone."
+    names: str = ""
 
 
 @dataclass

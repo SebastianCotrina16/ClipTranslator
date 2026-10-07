@@ -35,7 +35,7 @@ Clone the repository and double-click `ClipTranslator.bat`. It installs everythi
 
 1. Drop videos or a whole folder into the **Clips** list, or use **Add files** / **Add folder**.
 2. Choose the source language (or leave it on automatic detection) and the target language.
-3. Optionally add some context about the clip to improve the translation.
+3. Optionally add some context about the clip to improve the translation. In **Names**, list the players' names separated by commas so they are always spelled right (Gevo is always included).
 4. Click **Generate subtitles** for the selected clip, or **Process all** to subtitle and export every clip in the list.
 5. Review the result: click a line to jump to that moment in the player. Double-click any text or time to edit it, move lines **Earlier** or **Later**, and undo with **Ctrl+Z**. When two models heard a part differently, click **Versions** to compare them and pick the one that makes sense. Edits are saved automatically.
 6. Click **Export subtitles** to save the translated `.srt` next to the video, ready to import into CapCut, Premiere or DaVinci Resolve as its own subtitle layer. Or click **Export video** to get a copy of the video where you choose:
@@ -43,6 +43,8 @@ Clone the repository and double-click `ClipTranslator.bat`. It installs everythi
    - **Remove the background music**: keeps only the voices. Songs with singing may stay, and game sounds are removed too.
 
    Turn off the subtitles and keep music removal on to get a music-free video for your editor, then add the `.srt` on top.
+
+If something goes wrong or is very slow, click **Report a problem**: it saves a `.zip` on your Desktop with your computer details, settings, step timings and errors (never your videos, audio or API keys) that you can send to the developer.
 
 When a new version is available, click **Update now**: the app downloads it, checks that it is genuine, installs it and reopens with your clips. Wait until it finishes working before updating; your subtitle edits are always saved.
 

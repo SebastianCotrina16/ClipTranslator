@@ -4,7 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QModelIndex, Qt, QTimer, QUrl
+from PySide6.QtCore import QModelIndex, QStandardPaths, Qt, QTimer, QUrl
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemDelegate,
@@ -31,10 +31,11 @@ from PySide6.QtWidgets import (
 from app.application.pipeline import Pipeline
 from app.application.updates import Release
 from app.config.session import SavedClip, Session, SessionStore
-from app.config.store import SettingsStore
+from app.config.store import SettingsStore, data_dir
 from app.domain.languages import ENGLISH_NAMES, TARGET_LANGUAGES
 from app.domain.models import Cue
 from app.domain.subtitles import format_for_screen
+from app.infrastructure.diagnostics import create_report, report_name
 from app.infrastructure.ffmpeg import has_video
 from app.infrastructure.self_update import can_update_itself, launch_installer
 from app.presentation.gui.background import BackgroundRunner
@@ -51,6 +52,7 @@ from app.presentation.gui.job import (
     UpdateDownloadJob,
 )
 from app.presentation.gui.player import SubtitledPlayer
+from app.presentation.gui.report_dialog import ReportDialog
 from app.presentation.gui.setup_dialog import SetupDialog
 from app.presentation.gui.texts import MEDIA_FILTER, language_name, stage_label
 from app.presentation.gui.versions_dialog import VersionsDialog
@@ -110,9 +112,11 @@ class MainWindow(QMainWindow):
         self._add_folder_button = icon_button("Add folder", "folder")
         self._process_all_button = icon_button("Process all", "queue")
         self._settings_button = icon_button("Settings", "settings", "ghost")
+        self._report_button = icon_button("Report a problem", "report", "ghost")
         self._source = QComboBox()
         self._target = QComboBox()
         self._context = QLineEdit()
+        self._names = QLineEdit()
         self._start_button = icon_button("Generate subtitles", "sparkles", "primary")
         self._cancel_button = icon_button("Cancel", "stop", "danger")
         self._progress = QProgressBar()
@@ -192,7 +196,12 @@ class MainWindow(QMainWindow):
 
     def _configure_widgets(self) -> None:
         self._fill_languages()
-        self._context.setPlaceholderText("Optional: what happens in the clip, names…")
+        self._context.setPlaceholderText("Optional: what happens in the clip")
+        self._names.setText(self._settings.transcription.names)
+        self._names.setPlaceholderText("Kiki, Régis… (Gevo is built in)")
+        self._names.setToolTip(
+            "Names that are always spelled exactly like this, separated by commas."
+        )
         self._progress.setRange(0, PROGRESS_STEPS)
         self._progress.setTextVisible(False)
         self._percent.setObjectName("percent")
@@ -253,6 +262,7 @@ class MainWindow(QMainWindow):
         header.addWidget(logo)
         header.addLayout(titles)
         header.addStretch(1)
+        header.addWidget(self._report_button)
         header.addWidget(self._settings_button)
         return header
 
@@ -266,6 +276,7 @@ class MainWindow(QMainWindow):
         options.addRow("From", self._source)
         options.addRow("To", self._target)
         options.addRow("Context", self._context)
+        options.addRow("Names", self._names)
         buttons = QHBoxLayout()
         buttons.addWidget(self._start_button, stretch=1)
         buttons.addWidget(self._cancel_button, stretch=1)
@@ -339,6 +350,7 @@ class MainWindow(QMainWindow):
         self._add_folder_button.clicked.connect(self._choose_folder)
         self._process_all_button.clicked.connect(self._process_all)
         self._settings_button.clicked.connect(self._open_settings)
+        self._report_button.clicked.connect(self._report_problem)
         self._start_button.clicked.connect(self._start)
         self._cancel_button.clicked.connect(self._cancel)
         self._export_button.clicked.connect(self._export)
@@ -394,6 +406,7 @@ class MainWindow(QMainWindow):
         if self._media is None or self._runner.busy or self._updating:
             return
         self._settings.translation.target_language = self._target.currentData()
+        self._settings.transcription.names = self._names.text().strip()
         self._store.save(self._settings)
         request = JobRequest(
             media=self._media,
@@ -783,6 +796,29 @@ class MainWindow(QMainWindow):
         if folder is not None:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
+    def _report_problem(self) -> None:
+        cues = self._pipeline.state.cues if self._pipeline is not None else []
+        dialog = ReportDialog(bool(cues), self)
+        if not dialog.exec():
+            return
+        desktop = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)
+        target = Path(desktop or Path.home()) / report_name()
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            create_report(
+                target,
+                self._settings,
+                self._log_file.parent if self._log_file is not None else None,
+                self._settings.work_root(data_dir() / "work"),
+                cues if dialog.include_subtitles() else None,
+            )
+        except OSError as error:
+            self._show_error(f"The report could not be created: {error}")
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        self._show_saved("Report saved", [target])
+
     def _open_settings(self) -> None:
         if SetupDialog(self._store, self).exec():
             self._settings = self._store.load()
@@ -818,6 +854,7 @@ class MainWindow(QMainWindow):
             self._source,
             self._target,
             self._context,
+            self._names,
             self._settings_button,
             self._add_files_button,
             self._add_folder_button,

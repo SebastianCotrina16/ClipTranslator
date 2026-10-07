@@ -59,6 +59,7 @@ class Request:
     source_language: str
     target_language: str
     clip_context: str = ""
+    names: tuple[str, ...] = ()
 
 
 @dataclass
@@ -107,6 +108,11 @@ def build_user_message(
     else:
         parts = [f"Translate from {source} into {target}."]
         header = "Segments to translate:\n"
+    if request.names:
+        parts.append(
+            "Names that appear in this clip. Write them exactly like this and never "
+            f"translate them: {', '.join(request.names)}."
+        )
     if request.clip_context.strip():
         parts.append(f"Clip context (what is on screen): {request.clip_context.strip()}")
     if surrounding:

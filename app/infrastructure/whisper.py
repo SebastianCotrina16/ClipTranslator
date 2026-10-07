@@ -4,6 +4,7 @@ import gc
 import io
 import logging
 import os
+import time
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,7 @@ class FasterWhisperTranscriber:
         self.options = options
         self._models_dir = models_dir
         self._model: Any = None
+        self.last_run: dict[str, Any] = {}
 
     @classmethod
     def with_hardware_defaults(
@@ -98,16 +100,22 @@ class FasterWhisperTranscriber:
     ) -> list[Segment]:
         recover = self.options.vad and self.options.recover_skipped_speech
         first_share = FIRST_PASS_SHARE if recover else 1.0
+        started = time.monotonic()
+        self.last_run = {}
         segments = self._pass(audio, language, initial_prompt, progress, 0.0, first_share)
+        self.last_run["first_pass_seconds"] = round(time.monotonic() - started, 2)
         if recover:
             from faster_whisper.vad import VadOptions
 
             trusted = trusted_by(HallucinationDetector())
             long_regions = speech_regions(audio, VadOptions())
             skipped = skipped_regions(long_regions, [s for s in segments if trusted(s)])
+            self.last_run["skipped_regions"] = len(skipped)
             if skipped:
+                started = time.monotonic()
                 retried = self._region_by_region(audio, language, initial_prompt, skipped)
                 segments = replace_regions(segments, retried, skipped, trusted)
+                self.last_run["recovery_seconds"] = round(time.monotonic() - started, 2)
             segments = self._double_check(
                 audio, language, segments, long_regions, skipped, progress
             )
@@ -131,8 +139,10 @@ class FasterWhisperTranscriber:
         doubtful = doubtful_regions(
             speech_regions(audio, short_region_options()), segments, skipped, detector
         )
+        self.last_run["doubtful_regions"] = len(doubtful)
         if not doubtful:
             return segments
+        started = time.monotonic()
         second = self._second_model(progress)
         if second is None:
             return segments
@@ -147,6 +157,7 @@ class FasterWhisperTranscriber:
         finally:
             del second
             gc.collect()
+        self.last_run["second_model_seconds"] = round(time.monotonic() - started, 2)
         return settle(segments, heard, doubtful, (self.options.model, second_name), detector)
 
     def _second_model(self, progress: FractionCallback | None) -> Any:
@@ -158,11 +169,13 @@ class FasterWhisperTranscriber:
 
         try:
             if not is_model_downloaded(name, self._models_dir):
+                self.last_run["second_model_downloaded"] = True
                 download_whisper_model(name, self._models_dir, report)
             self.unload()
             return self._create_model(name)
-        except Exception:
+        except Exception as error:
             log.exception("The second opinion model %s is not available", name)
+            self.last_run["second_model_error"] = str(error)
             return None
 
     def _region_by_region(

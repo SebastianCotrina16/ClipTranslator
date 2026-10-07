@@ -41,6 +41,7 @@ from app.domain.models import (
     to_records,
     units_from_records,
 )
+from app.domain.names import NameFixer, known_names, spell_names
 from app.domain.quality import HallucinationDetector, apply_corrections
 from app.domain.segmentation import SegmentationRules, UnitBuilder
 from app.domain.subtitles import CueBuilder, CueRules
@@ -166,6 +167,10 @@ class Pipeline:
             self._transcriber = self.services.create_transcriber()
             self.state.backends["transcription"] = self._transcriber.description
         return self._transcriber
+
+    @property
+    def name_fixer(self) -> NameFixer:
+        return NameFixer(known_names(self.settings.transcription.names))
 
     @property
     def language_model(self) -> LanguageModel:
@@ -307,6 +312,9 @@ class Pipeline:
             compute_segments,
             upstream=self.state.keys[Stage.SEPARATION],
         )
+        details = getattr(transcriber, "last_run", None)
+        if details and not self.state.records[-1].cached:
+            self.state.records[-1].detail = json.dumps(details)
         segments = segments_from_records(raw_segments)
         rules = SegmentationRules(
             pause=self.settings.subtitles.unit_pause,
@@ -319,7 +327,7 @@ class Pipeline:
         raw_units = self._run_stage(
             Stage.UNITS, asdict(rules), compute_units, upstream=self.state.keys[Stage.TRANSCRIPTION]
         )
-        self.state.units = units_from_records(raw_units)
+        self.state.units = spell_names(units_from_records(raw_units), self.name_fixer)
         return self.state.units
 
     def review(self, clip_context: str = "") -> list[Unit]:
@@ -337,7 +345,8 @@ class Pipeline:
             return units
         self._release_transcriber()
         model = self.language_model
-        request = Request(Task.REVIEW, language, language, clip_context)
+        names = self.name_fixer.names
+        request = Request(Task.REVIEW, language, language, clip_context, names)
 
         def compute() -> dict[str, Any]:
             self._prepare_language_model(model, Stage.REVIEW)
@@ -351,6 +360,7 @@ class Pipeline:
             "prompt": REVIEW_PROMPT,
             "context": clip_context,
             "language": language,
+            "names": names,
         }
         try:
             data = self._run_stage(Stage.REVIEW, params, compute, upstream=units_key)
@@ -359,6 +369,7 @@ class Pipeline:
             self.state.keys[Stage.REVIEW] = units_key + "-failed"
             return units
         apply_corrections(units, data["corrections"])
+        spell_names(units, self.name_fixer)
         if data["report"]["untranslated"]:
             self.cache.invalidate(Stage.REVIEW)
         return units
@@ -379,7 +390,8 @@ class Pipeline:
         system_prompt = translation.effective_system_prompt()
         if merged:
             system_prompt += MERGED_REVIEW_ADDENDUM
-        request = Request(task, language, translation.target_language, clip_context)
+        names = self.name_fixer.names
+        request = Request(task, language, translation.target_language, clip_context, names)
 
         def compute() -> dict[str, Any]:
             self._prepare_language_model(model, Stage.TRANSLATION)
@@ -389,7 +401,9 @@ class Pipeline:
             if not result and units:
                 detail = report.errors[-1] if report.errors else "invalid responses"
                 raise LanguageModelError(f"Nothing could be translated: {detail}")
-            plain = Request(Task.TRANSLATE, language, translation.target_language, clip_context)
+            plain = Request(
+                Task.TRANSLATE, language, translation.target_language, clip_context, names
+            )
             versions = translate_versions(
                 TranslationService(model),
                 units,
@@ -411,6 +425,7 @@ class Pipeline:
             "target": translation.target_language,
             "context": clip_context,
             "language": language,
+            "names": names,
         }
         try:
             data = self._run_stage(
@@ -423,6 +438,7 @@ class Pipeline:
         for unit in units:
             unit.translation = data["translations"].get(str(unit.id))
             fill_versions(unit, versions.get(str(unit.id), []))
+        spell_names(units, self.name_fixer)
         self.state.records[-1].detail = json.dumps(data["report"], ensure_ascii=False)
         if data["report"]["untranslated"]:
             self.cache.invalidate(Stage.TRANSLATION)
@@ -445,7 +461,13 @@ class Pipeline:
                 for cue in cues[low:high]
                 if cue is not target
             ]
-            request = Request(Task.TRANSLATE, language, translation.target_language, clip_context)
+            request = Request(
+                Task.TRANSLATE,
+                language,
+                translation.target_language,
+                clip_context,
+                self.name_fixer.names,
+            )
             text = TranslationService(model).translate_one(
                 {"id": target.index, "text": target.original},
                 request,
@@ -456,6 +478,7 @@ class Pipeline:
             model.unload()
         if text is None:
             raise LanguageModelError("The model did not return a translation for that line.")
+        text = self.name_fixer.fix(text) or text
         target.translation = text
         self.save_edits()
         return text
@@ -477,6 +500,7 @@ class Pipeline:
         if edited is not None and len(edited) == len(self.state.cues):
             self.state.cues = edited
             self.state.restored_edits = True
+        self._append_run_log()
         return self.state.cues
 
     def save_edits(self) -> None:
@@ -505,7 +529,6 @@ class Pipeline:
             extras,
         )
         self.progress(Stage.EXPORT, 1.0, STAGE_LABELS[Stage.EXPORT])
-        self._append_run_log(files)
         return files
 
     def _keep_original_language(self, units: list[Unit]) -> list[Unit]:
@@ -570,10 +593,12 @@ class Pipeline:
         self.progress(stage, 1.0, STAGE_LABELS[stage] + suffix)
         return result.data
 
-    def _append_run_log(self, files: list[Path]) -> None:
+    def _append_run_log(self) -> None:
         entry = {
             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
             "media": str(self.state.media),
+            "duration": self.state.duration,
+            "total_seconds": round(sum(record.seconds for record in self.state.records), 2),
             "environment": self.services.environment(),
             "language": self.state.language,
             "language_detection": self.state.language_detection,
@@ -581,7 +606,6 @@ class Pipeline:
             "stages": [asdict(record) for record in self.state.records],
             "flags": _count_flags(self.state.cues),
             "warnings": self.state.warnings,
-            "files": [str(path) for path in files],
             "settings": redacted(self.settings),
         }
         with (self.state.work_dir / "run.log").open("a", encoding="utf-8") as log_file:
