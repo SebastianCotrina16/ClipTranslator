@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QModelIndex, Qt, QTimer, QUrl
@@ -61,6 +63,13 @@ PROGRESS_STEPS = 1000
 DEFAULT_SHIFT_SECONDS = 0.25
 JOB_DONE_SIGNALS = ("succeeded", "failed", "cancelled")
 INSTALLER_HANDOFF_MS = 800
+
+
+def show_in_folder(path: Path) -> None:
+    if sys.platform == "win32":
+        subprocess.Popen(f'explorer /select,"{path}"')
+    else:
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
 
 
 def restored_status(value: str) -> ClipStatus:
@@ -581,6 +590,8 @@ class MainWindow(QMainWindow):
         self._clips.set_status(self._pipeline.state.media, ClipStatus.EXPORTED)
         self._set_progress(1.0, f"Saved {len(self._files)} files next to the video.")
         self._update_buttons()
+        if not quiet:
+            self._show_saved("Subtitles saved", self._files)
 
     def _export_video(self) -> None:
         if self._pipeline is None or self._runner.busy:
@@ -621,6 +632,18 @@ class MainWindow(QMainWindow):
         if self._pipeline is not None:
             self._clips.set_status(self._pipeline.state.media, ClipStatus.EXPORTED)
         self._set_progress(1.0, f"Video saved: {output.name}")
+        self._show_saved("Video saved", [output])
+
+    def _show_saved(self, title: str, files: list[Path]) -> None:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle(title)
+        box.setText(f"{title} in:\n{files[0].parent}")
+        box.setInformativeText("\n".join(path.name for path in files))
+        show = box.addButton("Show in folder", QMessageBox.ButtonRole.ActionRole)
+        show.clicked.connect(lambda: show_in_folder(files[0]))
+        box.addButton(QMessageBox.StandardButton.Ok)
+        box.exec()
 
     def _show_error(self, message: str) -> None:
         self._set_progress(0.0, "Something went wrong.")
