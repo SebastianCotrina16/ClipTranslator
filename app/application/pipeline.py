@@ -41,7 +41,7 @@ from app.domain.models import (
     to_records,
     units_from_records,
 )
-from app.domain.names import NameFixer, known_names, spell_names
+from app.domain.names import NameFixer, known_names, prefer_named_versions, spell_names
 from app.domain.quality import HallucinationDetector, apply_corrections
 from app.domain.segmentation import SegmentationRules, UnitBuilder
 from app.domain.subtitles import CueBuilder, CueRules
@@ -438,7 +438,7 @@ class Pipeline:
         for unit in units:
             unit.translation = data["translations"].get(str(unit.id))
             fill_versions(unit, versions.get(str(unit.id), []))
-        spell_names(units, self.name_fixer)
+        prefer_named_versions(spell_names(units, self.name_fixer), self.name_fixer)
         self.state.records[-1].detail = json.dumps(data["report"], ensure_ascii=False)
         if data["report"]["untranslated"]:
             self.cache.invalidate(Stage.TRANSLATION)
@@ -532,6 +532,7 @@ class Pipeline:
         return files
 
     def _keep_original_language(self, units: list[Unit]) -> list[Unit]:
+        prefer_named_versions(units, self.name_fixer)
         for unit in units:
             unit.translation = unit.text
             for version in unit.versions:

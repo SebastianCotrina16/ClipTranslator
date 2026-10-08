@@ -125,3 +125,4 @@ def test_video_names_say_what_was_done() -> None:
     assert video_name(clip, True, False) == "clip.subtitled.mp4"
     assert video_name(clip, False, True) == "clip.no-music.mp4"
     assert video_name(clip, True, True) == "clip.subtitled.no-music.mp4"
+    assert video_name(clip, False, True, True) == "clip.no-music.leveled.mp4"

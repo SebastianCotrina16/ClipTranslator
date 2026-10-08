@@ -41,6 +41,9 @@ Clone the repository and double-click `ClipTranslator.bat`. It installs everythi
 6. Click **Export subtitles** to save the translated `.srt` next to the video, ready to import into CapCut, Premiere or DaVinci Resolve as its own subtitle layer. Or click **Export video** to get a copy of the video where you choose:
    - **Add the subtitles to the video**: burns them into the picture, with your choice of text color, a semi-transparent background box, size and position, and a live preview.
    - **Remove the background music**: keeps only the voices. Songs with singing may stay, and game sounds are removed too.
+   - **Level the volume**: evens out voices that are too quiet or too loud and tames the peaks. Choose how loud the video should be (−14 LUFS is what YouTube, TikTok and Instagram use) and how much to soften screams, then click **Listen** to hear the loudest 10 seconds of your clip with those settings, or **Original** to compare.
+
+   Hover or click any **?** to see what an option does. Your choices are remembered.
 
    Turn off the subtitles and keep music removal on to get a music-free video for your editor, then add the `.srt` on top.
 

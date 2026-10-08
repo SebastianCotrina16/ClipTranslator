@@ -11,6 +11,7 @@ from app.application.pipeline import Pipeline, Stage
 from app.application.updates import Installer, newer_release
 from app.bootstrap import create_pipeline
 from app.config.settings import Settings
+from app.domain.audio_leveling import Leveling
 from app.domain.subtitle_style import SubtitleStyle
 from app.infrastructure.ffmpeg import render_video
 from app.infrastructure.github_releases import GitHubReleases, installed_version
@@ -151,18 +152,25 @@ class ExportVideoJob(QObject):
     failed = Signal(str)
 
     def __init__(
-        self, pipeline: Pipeline, style: SubtitleStyle | None, remove_music: bool = False
+        self,
+        pipeline: Pipeline,
+        style: SubtitleStyle | None,
+        remove_music: bool = False,
+        leveling: Leveling | None = None,
     ) -> None:
         super().__init__()
         self._pipeline = pipeline
         self._style = style
         self._remove_music = remove_music
+        self._leveling = leveling
 
     @Slot()
     def run(self) -> None:
         try:
             media = self._pipeline.state.media
-            output = media.with_name(video_name(media, self._style is not None, self._remove_music))
+            subtitled, leveled = self._style is not None, self._leveling is not None
+            name = video_name(media, subtitled, self._remove_music, leveled)
+            output = media.with_name(name)
             subtitles = self._pipeline.export(extras=False)[0] if self._style is not None else None
             audio = None
             start = 0.0
@@ -179,6 +187,7 @@ class ExportVideoJob(QObject):
                 audio,
                 self._pipeline.state.duration,
                 lambda fraction: self.progressed.emit(start + (1.0 - start) * fraction),
+                self._leveling,
             )
         except Exception as error:
             log.exception("Exporting the video failed")

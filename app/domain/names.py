@@ -7,15 +7,18 @@ from collections.abc import Iterable
 from app.domain.models import Unit
 
 ALWAYS_SPELLED = ("Gevo",)
+MISHEARD_AS = {"Gevo": ("Geo",)}
 MIN_FUZZY_LENGTH = 4
 WORD = re.compile(r"[^\W\d_]+(?:['’\-][^\W\d_]+)*")
 POSSESSIVE = re.compile(r"['’]s$", re.IGNORECASE)
 SOUND_ALIKES = (
+    (re.compile(r"^h"), "g"),
     (re.compile(r"gu(?=[eiy])"), "g"),
     (re.compile(r"gh"), "g"),
     (re.compile(r"dj"), "j"),
     (re.compile(r"j"), "g"),
     (re.compile(r"w"), "v"),
+    (re.compile(r"b"), "v"),
     (re.compile(r"ph"), "f"),
     (re.compile(r"(eaux|eau|aux|au|ot|oh)$"), "o"),
     (re.compile(r"(.)\1+"), r"\1"),
@@ -55,6 +58,13 @@ class NameFixer:
     def __init__(self, names: Iterable[str]) -> None:
         self.names = tuple(names)
         self._names = {sound_key(name): name for name in self.names if " " not in name}
+        for name in self.names:
+            for alias in MISHEARD_AS.get(name, ()):
+                self._names.setdefault(sound_key(alias), name)
+
+    def mentions(self, text: str | None) -> bool:
+        known = {name.casefold() for name in self._names.values()}
+        return any(word.casefold() in known for word in WORD.findall(text or ""))
 
     def fix(self, text: str | None) -> str | None:
         if not text or not self._names:
@@ -94,4 +104,15 @@ def spell_names(units: list[Unit], fixer: NameFixer) -> list[Unit]:
         for version in unit.versions:
             version.text = fixer.fix(version.text) or version.text
             version.translation = fixer.fix(version.translation)
+    return units
+
+
+def prefer_named_versions(units: list[Unit], fixer: NameFixer) -> list[Unit]:
+    for unit in units:
+        if len(unit.versions) < 2 or fixer.mentions(unit.text):
+            continue
+        named = [version for version in unit.versions if fixer.mentions(version.text)]
+        if len(named) == 1:
+            unit.text = named[0].text
+            unit.translation = named[0].translation or unit.translation
     return units

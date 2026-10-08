@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import json
+import math
+import re
 import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable
-from functools import cache
+from functools import cache, lru_cache
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
 
+from app.domain.audio_leveling import Leveling
 from app.domain.subtitle_formats import timestamp
 from app.domain.subtitle_style import SubtitleStyle, force_style
 from app.infrastructure.process import HIDDEN_WINDOW, run_hidden
@@ -95,7 +99,18 @@ PREVIEW_SECONDS = 60.0
 AUDIO_ONLY_SUFFIXES = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".opus"}
 PROGRESS_KEYS = ("out_time_us=", "out_time_ms=")
 REENCODE = ["-c:v", "libx264", "-crf", "18", "-preset", "medium"]
-CLEAN_AUDIO = ["-c:a", "aac", "-b:a", "192k"]
+CLEAN_AUDIO = ["-c:a", "aac", "-b:a", "192k", "-ar", "48000"]
+PREVIEW_AUDIO_SECONDS = 10.0
+LOUDNESS_RATE = 8_000
+MEASURED_CACHE = 16
+MEASURED_FIELDS = {
+    "measured_I": "input_i",
+    "measured_TP": "input_tp",
+    "measured_LRA": "input_lra",
+    "measured_thresh": "input_thresh",
+    "offset": "target_offset",
+}
+JSON_BLOCK = re.compile(r"\{[^{}]*\}")
 
 
 def has_video(media: Path) -> bool:
@@ -121,27 +136,72 @@ def render_video(
     audio: Path | None = None,
     duration: float | None = None,
     progress: Callable[[float], None] | None = None,
+    leveling: Leveling | None = None,
 ) -> Path:
     if subtitles is not None:
         video = ["-vf", subtitle_filter(subtitles, style or SubtitleStyle()), *REENCODE]
     else:
         video = ["-c:v", "copy"]
+    audio_filter = loudness_filter(audio or media, leveling) if leveling else None
     try:
-        _run_with_progress(_video_command(media, output, video, audio), duration, progress)
+        command = _video_command(media, output, video, audio, audio_filter)
+        _run_with_progress(command, duration, progress)
     except FfmpegError:
         if subtitles is not None:
             raise
-        _run_with_progress(_video_command(media, output, REENCODE, audio), duration, progress)
+        command = _video_command(media, output, REENCODE, audio, audio_filter)
+        _run_with_progress(command, duration, progress)
     return output
 
 
-def _video_command(media: Path, output: Path, video: list[str], audio: Path | None) -> list[str]:
+def _video_command(
+    media: Path, output: Path, video: list[str], audio: Path | None, leveling: str | None
+) -> list[str]:
     command = [ffmpeg_executable(), "-hide_banner", "-loglevel", "error", "-y", "-i", str(media)]
-    if audio is None:
+    if audio is not None:
+        command += ["-i", str(audio)]
+    if audio is None and leveling is None:
         command += [*video, "-c:a", "copy"]
     else:
-        command += ["-i", str(audio), "-map", "0:v:0", "-map", "1:a:0", *video, *CLEAN_AUDIO]
+        source = "1:a:0" if audio is not None else "0:a:0"
+        command += ["-map", "0:v:0", "-map", source, *video]
+        command += ["-af", leveling] if leveling else []
+        command += CLEAN_AUDIO
     return [*command, "-progress", "pipe:1", "-nostats", str(output)]
+
+
+def loudness_filter(source: Path, leveling: Leveling) -> str:
+    stat = source.stat()
+    measured = _measured(str(source), stat.st_size, stat.st_mtime, leveling)
+    chain = [leveling.compressor] if leveling.compressor else []
+    values = "".join(f":{name}={measured[key]}" for name, key in MEASURED_FIELDS.items())
+    chain.append(f"loudnorm={leveling.loudness}{values if measured else ''}")
+    return ",".join(chain)
+
+
+@lru_cache(maxsize=MEASURED_CACHE)
+def _measured(source: str, size: int, modified: float, leveling: Leveling) -> dict[str, str]:
+    return measure_loudness(Path(source), leveling.compressor, leveling.loudness) or {}
+
+
+def measure_loudness(
+    source: Path, before: str = "", loudness: str = Leveling().loudness
+) -> dict[str, str] | None:
+    meter = f"loudnorm={loudness}:print_format=json"
+    command = [ffmpeg_executable(), "-hide_banner", "-nostats", "-i", str(source), "-vn"]
+    command += ["-af", f"{before},{meter}" if before else meter, "-f", "null", "-"]
+    result = run_hidden(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    blocks = JSON_BLOCK.findall(result.stderr or "")
+    if result.returncode != 0 or not blocks:
+        return None
+    try:
+        report = json.loads(blocks[-1])
+        measured = {key: str(report[key]) for key in MEASURED_FIELDS.values()}
+    except (json.JSONDecodeError, KeyError):
+        return None
+    if not all(math.isfinite(float(value)) for value in measured.values()):
+        return None
+    return measured
 
 
 def _run_with_progress(
@@ -207,3 +267,46 @@ def _progress_seconds(line: str) -> float | None:
             except ValueError:
                 return None
     return None
+
+
+def loudest_moment(source: Path, seconds: float = PREVIEW_AUDIO_SECONDS) -> float:
+    command = [ffmpeg_executable(), "-v", "error", "-i", str(source), "-vn", "-ac", "1"]
+    command += ["-ar", str(LOUDNESS_RATE), "-f", "f32le", "-"]
+    result = run_hidden(command, capture_output=True)
+    samples = np.frombuffer(result.stdout, dtype=np.float32)
+    window = int(seconds * LOUDNESS_RATE)
+    if result.returncode != 0 or len(samples) <= window:
+        return 0.0
+    energy = np.concatenate([[0.0], np.cumsum(samples.astype(np.float64) ** 2)])
+    totals = energy[window:] - energy[:-window]
+    return float(np.argmax(totals[:: LOUDNESS_RATE // 10])) / 10
+
+
+def render_audio_preview(
+    source: Path,
+    start: float,
+    leveling: Leveling | None,
+    output: Path,
+    seconds: float = PREVIEW_AUDIO_SECONDS,
+) -> Path:
+    audio_filter = ["-af", loudness_filter(source, leveling)] if leveling else []
+    run_ffmpeg(
+        [
+            "-ss",
+            f"{max(start - 2.0, 0.0):.3f}",
+            "-t",
+            f"{seconds + 2.0:.3f}",
+            "-i",
+            str(source),
+            "-vn",
+            *audio_filter,
+            "-ss",
+            "2" if start >= 2.0 else f"{start:.3f}",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            str(output),
+        ]
+    )
+    return output

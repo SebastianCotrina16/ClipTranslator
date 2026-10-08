@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
@@ -7,6 +8,12 @@ from app.domain.models import Segment
 
 MIN_CHECKED_REGION = 4.0
 MIN_COVERAGE = 0.35
+MAX_WINDOW_GAP = 1.0
+MAX_WINDOW_LENGTH = 15.0
+MIN_CHECKED_WINDOW = 1.5
+MAX_SHARED_SPEECH = 0.3
+MIN_SPOKEN_SECONDS = 0.1
+WORD = re.compile(r"[^\W_]+")
 
 
 @dataclass(frozen=True)
@@ -50,6 +57,25 @@ def covered_fraction(region: Region, segments: Iterable[Segment]) -> float:
     return covered / region.duration
 
 
+def check_windows(
+    regions: Iterable[Region],
+    max_gap: float = MAX_WINDOW_GAP,
+    max_length: float = MAX_WINDOW_LENGTH,
+) -> list[Region]:
+    windows: list[Region] = []
+    for region in sorted(regions, key=lambda region: region.start):
+        last = windows[-1] if windows else None
+        if (
+            last is not None
+            and region.start - last.end <= max_gap
+            and region.end - last.start <= max_length
+        ):
+            windows[-1] = Region(last.start, max(last.end, region.end))
+        else:
+            windows.append(region)
+    return windows
+
+
 def skipped_regions(
     regions: Iterable[Region],
     segments: list[Segment],
@@ -63,11 +89,29 @@ def skipped_regions(
     ]
 
 
-def word_count(segments: Iterable[Segment]) -> int:
-    return sum(len(segment.text.split()) for segment in segments)
+def spoken_words(segment: Segment) -> set[str]:
+    return {word for word in WORD.findall(segment.text.casefold())}
 
 
-def replace_regions(
+def overlaps(first: Segment, second: Segment) -> bool:
+    spans, other_spans = spoken_spans([first]), spoken_spans([second])
+    shared = sum(
+        max(0.0, min(end, other_end) - max(start, other_start))
+        for start, end in spans
+        for other_start, other_end in other_spans
+    )
+    shorter = min(sum(end - start for start, end in found) for found in (spans, other_spans))
+    return shared > MAX_SHARED_SPEECH * max(shorter, MIN_SPOKEN_SECONDS)
+
+
+def extends(new: Segment, old: list[Segment]) -> bool:
+    heard = spoken_words(new)
+    return all(spoken_words(segment) <= heard for segment in old) and len(heard) > len(
+        set().union(*(spoken_words(segment) for segment in old))
+    )
+
+
+def fill_gaps(
     segments: list[Segment],
     retried: list[Segment],
     regions: list[Region],
@@ -76,14 +120,17 @@ def replace_regions(
     def inside(segment: Segment) -> bool:
         return any(region.holds(segment) for region in regions)
 
-    old = [segment for segment in segments if inside(segment) and trusted(segment)]
-    new = [segment for segment in retried if inside(segment) and trusted(segment)]
-    if word_count(new) <= word_count(old):
+    kept = list(segments)
+    for new in (segment for segment in retried if inside(segment) and trusted(segment)):
+        clashing = [old for old in kept if overlaps(old, new)]
+        heard = [old for old in clashing if trusted(old)]
+        if heard and not extends(new, heard):
+            continue
+        gone = {id(old) for old in clashing}
+        kept = [old for old in kept if id(old) not in gone] + [new]
+    if kept == segments:
         return segments
-    merged = sorted(
-        [segment for segment in segments if not inside(segment)] + new,
-        key=lambda segment: segment.start,
-    )
+    merged = sorted(kept, key=lambda segment: segment.start)
     for position, segment in enumerate(merged):
         segment.id = position
     return merged

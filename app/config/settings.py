@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config.prompts import translation_prompt_for
+from app.domain.audio_leveling import Leveling
 from app.domain.subtitle_style import SubtitleStyle
 
 ANTHROPIC_KEY_VARIABLE = "ANTHROPIC_API_KEY"
@@ -76,11 +77,21 @@ class VideoSettings:
     position: str = SubtitleStyle.position.value
     burn_subtitles: bool = True
     remove_music: bool = False
+    level_audio: bool = False
+    loudness_target: int = Leveling.target
+    tame_loud_moments: str = Leveling.tame.value
 
     def style(self) -> SubtitleStyle:
         return SubtitleStyle.from_values(
             self.text_color, self.background, self.box_opacity, self.font_size, self.position
         )
+
+    def leveling(self) -> Leveling:
+        return Leveling.from_values(self.loudness_target, self.tame_loud_moments)
+
+    def remember_leveling(self, leveling: Leveling) -> None:
+        self.loudness_target = leveling.target
+        self.tame_loud_moments = leveling.tame.value
 
     def remember(self, style: SubtitleStyle) -> None:
         self.text_color = style.text_color

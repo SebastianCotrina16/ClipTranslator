@@ -28,6 +28,8 @@ stream: the streamer and other players react to drawings.
 - Keep the tone, exclamations, slang and humor. Do not tone down profanity or add \
 explanations, but do not add profanity, jokes or emphasis that are not in the original \
 either.
+- Translate slang, idioms and exclamations by what they mean, not word for word (Spanish \
+"¡mi madre!" or "¡a la madre!" means "holy crap!", not "my mom!").
 - The transcript may contain speech-recognition errors. If a word makes no sense, infer \
 from context what was meant and translate that.
 - Keep each segment short so it works as a subtitle.
@@ -45,6 +47,9 @@ context, wrong word boundaries, misheard names (Gartic Phone, player names) and 
 question or exclamation marks. Spanish examples: "también" vs "tan bien" ("¿cómo dibujan \
 tan bien?"), "haber" vs "a ver", "hay" / "ahí" / "ay", "echo" vs "hecho", "sino" vs "si no", \
 "porque" vs "por qué", "valla" / "vaya", "e" vs "he".
+- Players talk about what the drawings show: video games, characters, movies, anime and \
+memes. A phrase that makes no sense may be the misheard name of one of them ("hola white" \
+for "Hollow Knight"); fix it only when you are confident.
 - Keep everything else exactly as it is: do not translate, rephrase, summarize, censor or \
 "improve" grammar, slang, dialect, repetitions or filler words.
 - If a segment has no clear error, return it unchanged. When in doubt, leave it unchanged.

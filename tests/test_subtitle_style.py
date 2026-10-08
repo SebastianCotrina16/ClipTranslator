@@ -8,6 +8,7 @@ import pytest
 from PySide6.QtWidgets import QApplication, QDialogButtonBox
 
 from app.config.store import SettingsStore
+from app.domain.audio_leveling import Leveling, Tame, target_hint
 from app.domain.subtitle_style import (
     Background,
     Position,
@@ -15,7 +16,14 @@ from app.domain.subtitle_style import (
     ass_color,
     force_style,
 )
-from app.infrastructure.ffmpeg import ffmpeg_executable, render_preview, render_video
+from app.infrastructure.ffmpeg import (
+    ffmpeg_executable,
+    loudest_moment,
+    measure_loudness,
+    render_audio_preview,
+    render_preview,
+    render_video,
+)
 from app.presentation.gui.video_style_dialog import VideoStyleDialog
 
 
@@ -156,4 +164,85 @@ def test_export_needs_subtitles_or_music_removal(qt_app: QApplication, sample_vi
     assert not export.isEnabled()
     dialog._subtitles.setChecked(True)
     assert export.isEnabled()
+    dialog.reject()
+
+
+def test_quiet_audio_is_leveled_without_peaks(tmp_path: Path) -> None:
+    clip = make_media(
+        tmp_path / "quiet.mp4",
+        "color=c=blue:s=320x180:d=6",
+        "anoisesrc=color=pink:amplitude=0.02:d=6",
+    )
+    before = measure_loudness(clip)
+    output = render_video(clip, tmp_path / "leveled.mp4", leveling=Leveling())
+    after = measure_loudness(output)
+    assert before is not None and after is not None
+    assert float(before["input_i"]) < -30
+    assert abs(float(after["input_i"]) + 14) < 1.5
+    assert float(after["input_tp"]) <= -1.0
+    assert "Video: h264" in streams(output)
+
+
+def test_export_can_only_level_the_volume(qt_app: QApplication, sample_video: Path) -> None:
+    dialog = VideoStyleDialog(sample_video, 1.0, "", SubtitleStyle(), None, False, False, True)
+    export = dialog._buttons.button(QDialogButtonBox.StandardButton.Ok)
+    assert export.isEnabled()
+    assert dialog.level_audio()
+    dialog._level.setChecked(False)
+    assert not export.isEnabled()
+    dialog.reject()
+
+
+def test_leveling_values_are_kept_in_range() -> None:
+    assert Leveling.from_values(-30, "loud") == Leveling(-20, Tame.LIGHT)
+    assert Leveling.from_values(-5, "strong") == Leveling(-10, Tame.STRONG)
+    assert "recommended" in target_hint(-14)
+    assert target_hint(-20) == "Quiet, like TV"
+    assert target_hint(-10) == "Very loud, can sound harsh"
+
+
+def test_leveling_settings_are_remembered(tmp_path: Path) -> None:
+    store = SettingsStore(tmp_path / "config.toml")
+    settings = store.load()
+    assert settings.video.leveling() == Leveling(-14, Tame.LIGHT)
+    settings.video.remember_leveling(Leveling(-16, Tame.STRONG))
+    store.save(settings)
+    assert store.load().video.leveling() == Leveling(-16, Tame.STRONG)
+
+
+def test_the_loudest_moment_is_found_and_previewed(tmp_path: Path) -> None:
+    mixed = tmp_path / "mixed.wav"
+    quiet = "anoisesrc=color=pink:amplitude=0.01:d=30"
+    loud = "anoisesrc=color=pink:amplitude=0.5:d=4,adelay=18000"
+    subprocess.run(
+        [ffmpeg_executable(), "-hide_banner", "-loglevel", "error"]
+        + ["-f", "lavfi", "-i", quiet, "-f", "lavfi", "-i", loud]
+        + ["-filter_complex", "amix=normalize=0:duration=first", str(mixed)],
+        check=True,
+    )
+    start = loudest_moment(mixed)
+    assert 12.0 <= start <= 18.0
+    sound = render_audio_preview(mixed, start, Leveling(), tmp_path / "preview.wav")
+    assert 9.0 < sf_duration(sound) < 11.0
+
+
+def sf_duration(path: Path) -> float:
+    import soundfile
+
+    info = soundfile.info(path)
+    return info.frames / info.samplerate
+
+
+def test_dialog_returns_the_chosen_leveling(qt_app: QApplication, sample_video: Path) -> None:
+    dialog = VideoStyleDialog(
+        sample_video, 1.0, "", SubtitleStyle(), None, False, False, True, Leveling(-16, Tame.OFF)
+    )
+    assert dialog.leveling() == Leveling(-16, Tame.OFF)
+    assert "Podcasts" in dialog._volume_value.text()
+    dialog._volume.setValue(-12)
+    dialog._tame.setCurrentIndex(dialog._tame.findData("strong"))
+    assert dialog.leveling() == Leveling(-12, Tame.STRONG)
+    assert "almost as loud" in dialog._tame_note.text()
+    dialog._level.setChecked(False)
+    assert not dialog._level_box.isEnabled()
     dialog.reject()

@@ -16,10 +16,9 @@ def safe_stem(name: str) -> str:
     return cleaned or "clip"
 
 
-def video_name(media: Path, subtitled: bool, without_music: bool) -> str:
-    tags = [
-        tag for tag, wanted in (("subtitled", subtitled), ("no-music", without_music)) if wanted
-    ]
+def video_name(media: Path, subtitled: bool, without_music: bool, leveled: bool = False) -> str:
+    wanted = (("subtitled", subtitled), ("no-music", without_music), ("leveled", leveled))
+    tags = [tag for tag, chosen in wanted if chosen]
     return ".".join([safe_stem(media.stem), *tags, "mp4"])
 
 

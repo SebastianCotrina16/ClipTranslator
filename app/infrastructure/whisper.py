@@ -12,7 +12,13 @@ from typing import Any
 import numpy as np
 
 from app.application.ports import FractionCallback
-from app.domain.coverage import Region, replace_regions, skipped_regions
+from app.domain.coverage import (
+    MIN_CHECKED_WINDOW,
+    Region,
+    check_windows,
+    fill_gaps,
+    skipped_regions,
+)
 from app.domain.models import LanguageGuess, Segment, Word
 from app.domain.quality import HallucinationDetector
 from app.domain.second_opinion import doubtful_regions, settle, trusted_by
@@ -21,13 +27,14 @@ from app.infrastructure.gpu import expose_cuda_libraries, whisper_defaults
 log = logging.getLogger(__name__)
 
 TEMPERATURE_FALLBACK = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
-ENGINE_REVISION = 5
+ENGINE_REVISION = 11
 SECOND_OPINION_DOWNLOAD_SHARE = 0.1
 SAMPLE_RATE = 16_000
 FIRST_PASS_SHARE = 0.8
 SHORT_REGION_SILENCE_MS = 300
 SHORT_REGION_MAX_SECONDS = 8.0
 SHORT_REGION_PAD_MS = 200
+MAX_RECOVERED_NO_SPEECH = 0.6
 
 
 def quiet_model_downloads() -> None:
@@ -109,15 +116,23 @@ class FasterWhisperTranscriber:
 
             trusted = trusted_by(HallucinationDetector())
             long_regions = speech_regions(audio, VadOptions())
-            skipped = skipped_regions(long_regions, [s for s in segments if trusted(s)])
+            short_regions = speech_regions(audio, short_region_options())
+            heard = [segment for segment in segments if trusted(segment)]
+            skipped = skipped_regions(check_windows(short_regions), heard, MIN_CHECKED_WINDOW)
             self.last_run["skipped_regions"] = len(skipped)
             if skipped:
                 started = time.monotonic()
-                retried = self._region_by_region(audio, language, initial_prompt, skipped)
-                segments = replace_regions(segments, retried, skipped, trusted)
+                retried = [
+                    segment
+                    for segment in self._region_by_region(
+                        audio, language, initial_prompt, skipped, short_regions
+                    )
+                    if segment.no_speech_prob <= MAX_RECOVERED_NO_SPEECH
+                ]
+                segments = fill_gaps(segments, retried, skipped, trusted)
                 self.last_run["recovery_seconds"] = round(time.monotonic() - started, 2)
             segments = self._double_check(
-                audio, language, segments, long_regions, skipped, progress
+                audio, language, segments, long_regions, short_regions, skipped, progress
             )
         if progress:
             progress(1.0)
@@ -129,6 +144,7 @@ class FasterWhisperTranscriber:
         language: str,
         segments: list[Segment],
         long_regions: list[Region],
+        short_regions: list[Region],
         skipped: list[Region],
         progress: FractionCallback | None,
     ) -> list[Segment]:
@@ -136,9 +152,7 @@ class FasterWhisperTranscriber:
         if not second_name or second_name == self.options.model:
             return segments
         detector = HallucinationDetector()
-        doubtful = doubtful_regions(
-            speech_regions(audio, short_region_options()), segments, skipped, detector
-        )
+        doubtful = doubtful_regions(short_regions, segments, skipped, detector)
         self.last_run["doubtful_regions"] = len(doubtful)
         if not doubtful:
             return segments
@@ -184,9 +198,10 @@ class FasterWhisperTranscriber:
         language: str,
         initial_prompt: str | None,
         skipped: list[Region],
+        short_regions: list[Region],
     ) -> list[Segment]:
         segments: list[Segment] = []
-        for region in speech_regions(audio, short_region_options()):
+        for region in short_regions:
             if not any(region.start < gap.end and region.end > gap.start for gap in skipped):
                 continue
             piece = audio[int(region.start * SAMPLE_RATE) : int(region.end * SAMPLE_RATE)]

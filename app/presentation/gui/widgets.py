@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import html
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLayout,
     QPushButton,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -51,6 +52,30 @@ def icon_button(text: str, icon_name: str, object_name: str = "") -> QPushButton
     if object_name:
         button.setObjectName(object_name)
     return button
+
+
+def help_button(text: str) -> QPushButton:
+    explanation = f"<p style='max-width: 320px'>{html.escape(text)}</p>"
+    button = QPushButton("?")
+    button.setObjectName("help")
+    button.setCursor(Qt.CursorShape.WhatsThisCursor)
+    button.setToolTip(explanation)
+    button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    button.clicked.connect(
+        lambda: QToolTip.showText(
+            button.mapToGlobal(QPoint(0, button.height())), explanation, button
+        )
+    )
+    return button
+
+
+def with_help(widget: QWidget, text: str) -> QHBoxLayout:
+    row = QHBoxLayout()
+    row.setSpacing(8)
+    row.addWidget(widget)
+    row.addWidget(help_button(text))
+    row.addStretch(1)
+    return row
 
 
 class NoticeBox(QFrame):
