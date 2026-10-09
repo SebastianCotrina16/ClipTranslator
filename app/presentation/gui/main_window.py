@@ -624,6 +624,8 @@ class MainWindow(QMainWindow):
             video.level_audio,
             video.leveling(),
             self._pipeline.state.work_dir / "vocals_44k.wav",
+            video.translate_prompts,
+            video.prompts(),
         )
         if not dialog.exec():
             return
@@ -633,12 +635,15 @@ class MainWindow(QMainWindow):
         video.remove_music = dialog.remove_music()
         video.level_audio = dialog.level_audio()
         video.remember_leveling(dialog.leveling())
+        video.translate_prompts = dialog.translate_prompts()
+        video.prompt_style = dialog.prompt_style().value
         self._store.save(self._settings)
         job = ExportVideoJob(
             self._pipeline,
             style if video.burn_subtitles else None,
             video.remove_music,
             video.leveling() if video.level_audio else None,
+            video.prompts() if video.translate_prompts else None,
         )
         job.progressed.connect(
             lambda fraction: self._set_progress(fraction, f"Creating the video… {fraction:.0%}")

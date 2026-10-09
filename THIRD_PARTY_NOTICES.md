@@ -11,6 +11,7 @@ ClipTranslator uses the following third-party models and software. Each one is d
 | Qwen 3.5 (4B, 9B, 27B) | Alibaba Cloud, Qwen Team | Apache-2.0 | https://huggingface.co/Qwen |
 | UVR-MDX-NET-Voc_FT | Ultimate Vocal Remover project | MIT | https://github.com/Anjok07/ultimatevocalremovergui |
 | Silero VAD | Silero Team | MIT | https://github.com/snakers4/silero-vad |
+| PP-OCRv6 text detection, PP-OCRv5 Slavic text recognition (ONNX) | PaddlePaddle, converted by RapidAI | Apache-2.0 | https://github.com/RapidAI/RapidOCR |
 
 ## Included in the Windows installer
 
@@ -19,6 +20,7 @@ ClipTranslator uses the following third-party models and software. Each one is d
 | uv | MIT or Apache-2.0 | https://github.com/astral-sh/uv |
 | Python 3.12 (python-build-standalone) | PSF-2.0 | https://github.com/astral-sh/python-build-standalone |
 | Microsoft Visual C++ Redistributable | Microsoft Software License Terms | https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist |
+| Nunito font (app/assets/fonts) | SIL Open Font License 1.1 | https://github.com/googlefonts/nunito |
 
 ## Installed as dependencies
 
@@ -28,6 +30,12 @@ ClipTranslator uses the following third-party models and software. Each one is d
 | CTranslate2 | MIT | https://github.com/OpenNMT/CTranslate2 |
 | ONNX Runtime | MIT | https://github.com/microsoft/onnxruntime |
 | Qt for Python (PySide6) | LGPL-3.0 | https://www.qt.io/qt-for-python |
+| RapidOCR | Apache-2.0 | https://github.com/RapidAI/RapidOCR |
+| OpenCV (opencv-python-headless) | Apache-2.0 | https://github.com/opencv/opencv-python |
+| Pillow | MIT-CMU | https://github.com/python-pillow/Pillow |
+| Shapely | BSD-3-Clause | https://github.com/shapely/shapely |
+| pyclipper | MIT | https://github.com/fonttools/pyclipper |
+| OmegaConf | BSD-3-Clause | https://github.com/omry/omegaconf |
 | FFmpeg (through imageio-ffmpeg) | GPL-3.0 | https://ffmpeg.org |
 | imageio-ffmpeg | BSD-2-Clause | https://github.com/imageio/imageio-ffmpeg |
 | Hugging Face Hub | Apache-2.0 | https://github.com/huggingface/huggingface_hub |

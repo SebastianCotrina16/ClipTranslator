@@ -16,6 +16,7 @@ from app.infrastructure.ffmpeg import FfmpegAudio
 from app.infrastructure.gpu import detect_gpu
 from app.infrastructure.llm.factory import create_language_model
 from app.infrastructure.process import lower_current_process_priority
+from app.infrastructure.prompt_ocr import create_prompt_scanner
 from app.infrastructure.separation.worker import IsolatedVocalSeparator
 from app.infrastructure.subtitle_files import SubtitleFileWriter, safe_stem
 from app.infrastructure.whisper import FasterWhisperTranscriber, SileroSpeechDetector
@@ -57,6 +58,7 @@ def build_services(settings: Settings) -> PipelineServices:
         create_language_model=lambda: create_language_model(settings.translation, threads),
         create_separator=create_separator,
         environment=environment,
+        create_prompt_reader=lambda: create_prompt_scanner(models_dir()),
     )
 
 

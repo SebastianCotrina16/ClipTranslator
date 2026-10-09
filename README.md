@@ -9,6 +9,7 @@ App for detecting and translating languages in video and audio clips. It transcr
 - Voice isolation to remove music and background noise.
 - Context-aware translation with a local model (Ollama) or an API (Anthropic, OpenAI-compatible).
 - Readable subtitles: line length, reading speed and timing are adjusted automatically.
+- Translates the written Gartic Phone prompts on screen, replacing them in the video like Google Lens.
 - Runs on NVIDIA GPUs or CPU only.
 
 ## Requirements
@@ -41,6 +42,7 @@ Clone the repository and double-click `ClipTranslator.bat`. It installs everythi
 6. Click **Export subtitles** to save the translated `.srt` next to the video, ready to import into CapCut, Premiere or DaVinci Resolve as its own subtitle layer. Or click **Export video** to get a copy of the video where you choose:
    - **Add the subtitles to the video**: burns them into the picture, with your choice of text color, a semi-transparent background box, size and position, and a live preview.
    - **Remove the background music**: keeps only the voices. Songs with singing may stay, and game sounds are removed too.
+   - **Translate the prompts on screen**: finds the written Gartic Phone prompts in the album and shows them in the target language right inside the video, like Google Lens, even while the streamer scrolls. Choose **Same text size, wider box** to keep the game's text size, or **Fit in the box, smaller text** to keep the boxes as they are. Player names, chat and drawings are left alone, and a prompt hidden behind the webcam stays as it is.
    - **Level the volume**: evens out voices that are too quiet or too loud and tames the peaks. Choose how loud the video should be (−14 LUFS is what YouTube, TikTok and Instagram use) and how much to soften screams, then click **Listen** to hear the loudest 10 seconds of your clip with those settings, or **Original** to compare.
 
    Hover or click any **?** to see what an option does. Your choices are remembered.

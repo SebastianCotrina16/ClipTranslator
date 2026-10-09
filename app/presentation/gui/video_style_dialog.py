@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QRadioButton,
     QSlider,
     QVBoxLayout,
     QWidget,
@@ -35,6 +36,7 @@ from app.domain.audio_leveling import (
     Tame,
     target_hint,
 )
+from app.domain.screen_prompts import PromptStyle
 from app.domain.subtitle_style import (
     FONT_SIZES,
     TEXT_COLORS,
@@ -83,6 +85,14 @@ TAME_HELP = (
     "How much screams and sudden loud moments are softened compared to normal talking. "
     "Off keeps them as they are, Strong makes everything almost the same volume."
 )
+PROMPTS_HELP = (
+    "Finds the written Gartic Phone prompts in the album and shows them in the target "
+    "language right inside the video, like Google Lens. Player names, chat and drawings are "
+    "left alone. It reads the whole clip, so the export takes a bit longer. A prompt hidden "
+    "behind the webcam stays as it is."
+)
+WIDEN_NOTE = "The text keeps the game's size and the box gets wider, like the game would do."
+FIT_NOTE = "The box keeps its size; long translations get smaller text."
 LISTEN_HELP = (
     "Plays the loudest 10 seconds of your clip with these settings, so you can hear the "
     "result before exporting. Original plays the same moment without any changes."
@@ -148,6 +158,8 @@ class VideoStyleDialog(QDialog):
         level_audio: bool = False,
         leveling: Leveling | None = None,
         voices: Path | None = None,
+        translate_prompts: bool = False,
+        prompt_style: PromptStyle = PromptStyle.WIDEN,
     ) -> None:
         super().__init__(parent)
         self._media = media
@@ -168,6 +180,10 @@ class VideoStyleDialog(QDialog):
         self._subtitles = QCheckBox("Add the subtitles to the video")
         self._no_music = QCheckBox("Remove the background music")
         self._level = QCheckBox("Level the volume")
+        self._prompts = QCheckBox("Translate the prompts on screen")
+        self._widen = QRadioButton("Same text size, wider box")
+        self._fit = QRadioButton("Fit in the box, smaller text")
+        self._prompt_box = QWidget()
         self._style_box = QWidget()
         self._level_box = QWidget()
         self._color = QComboBox()
@@ -197,6 +213,8 @@ class VideoStyleDialog(QDialog):
         self._subtitles.setChecked(burn_subtitles)
         self._no_music.setChecked(remove_music)
         self._level.setChecked(level_audio)
+        self._prompts.setChecked(translate_prompts)
+        (self._fit if prompt_style is PromptStyle.FIT else self._widen).setChecked(True)
         self._connect()
         self._refresh()
 
@@ -208,6 +226,12 @@ class VideoStyleDialog(QDialog):
 
     def level_audio(self) -> bool:
         return self._level.isChecked()
+
+    def translate_prompts(self) -> bool:
+        return self._prompts.isChecked()
+
+    def prompt_style(self) -> PromptStyle:
+        return PromptStyle.FIT if self._fit.isChecked() else PromptStyle.WIDEN
 
     def leveling(self) -> Leveling:
         return Leveling(self._volume.value(), Tame(self._tame.currentData()))
@@ -247,7 +271,11 @@ class VideoStyleDialog(QDialog):
         layout.addWidget(self._status)
         columns = QHBoxLayout()
         columns.setSpacing(14)
-        columns.addWidget(self._subtitles_panel(), stretch=1)
+        left = QVBoxLayout()
+        left.setSpacing(14)
+        left.addWidget(self._subtitles_panel())
+        left.addWidget(self._prompts_panel())
+        columns.addLayout(left, stretch=1)
         columns.addWidget(self._audio_panel(), stretch=1)
         layout.addLayout(columns)
         layout.addWidget(self._buttons)
@@ -279,6 +307,21 @@ class VideoStyleDialog(QDialog):
             section_label("Subtitles"),
             with_help(self._subtitles, SUBTITLES_HELP),
             self._style_box,
+        )
+
+    def _prompts_panel(self) -> QFrame:
+        choices = QVBoxLayout(self._prompt_box)
+        choices.setContentsMargins(INDENT, 0, 0, 0)
+        choices.setSpacing(4)
+        for button, note in ((self._widen, WIDEN_NOTE), (self._fit, FIT_NOTE)):
+            choices.addWidget(button)
+            hint = muted(note)
+            hint.setContentsMargins(INDENT, 0, 0, 6)
+            choices.addWidget(hint)
+        return panel(
+            section_label("Prompts on screen"),
+            with_help(self._prompts, PROMPTS_HELP),
+            self._prompt_box,
         )
 
     def _audio_panel(self) -> QFrame:
@@ -345,7 +388,7 @@ class VideoStyleDialog(QDialog):
             combo.currentIndexChanged.connect(self._refresh)
         self._opacity.valueChanged.connect(self._refresh)
         self._subtitles.toggled.connect(self._refresh)
-        for box in (self._no_music, self._level):
+        for box in (self._no_music, self._level, self._prompts):
             box.toggled.connect(self._refresh_audio)
         self._volume.valueChanged.connect(self._describe_leveling)
         self._tame.currentIndexChanged.connect(self._describe_leveling)
@@ -384,6 +427,7 @@ class VideoStyleDialog(QDialog):
 
     def _refresh_audio(self) -> None:
         self._level_box.setEnabled(self.level_audio())
+        self._prompt_box.setEnabled(self.translate_prompts())
         self._update_export_button()
 
     def _describe_leveling(self) -> None:
@@ -391,8 +435,18 @@ class VideoStyleDialog(QDialog):
         self._volume_value.setText(f"<b>{target} LUFS</b> · {target_hint(target)}")
         self._tame_note.setText(TAME_CHOICES[Tame(self._tame.currentData())][1])
 
+    def _anything_chosen(self) -> bool:
+        return any(
+            (
+                self.burn_subtitles(),
+                self.remove_music(),
+                self.level_audio(),
+                self.translate_prompts(),
+            )
+        )
+
     def _update_export_button(self) -> None:
-        chosen = self.burn_subtitles() or self.remove_music() or self.level_audio()
+        chosen = self._anything_chosen()
         self._buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(chosen)
         if not chosen:
             self._status.setText(NOTHING_CHOSEN)
@@ -481,7 +535,7 @@ class VideoStyleDialog(QDialog):
                 Qt.TransformationMode.SmoothTransformation,
             )
         )
-        if self.burn_subtitles() or self.remove_music() or self.level_audio():
+        if self._anything_chosen():
             self._status.setText("Preview on a frame of your video.")
 
     def _on_failed(self, number: int, message: str) -> None:

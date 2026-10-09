@@ -16,11 +16,13 @@ from app.application.ports import (
     FractionCallback,
     LanguageModel,
     LanguageModelError,
+    PromptReader,
     SpeechDetector,
     SubtitleWriter,
     Transcriber,
     VocalSeparator,
 )
+from app.application.screen_prompts import translate_prompts
 from app.application.stage_cache import StageCache
 from app.application.translation import (
     Request,
@@ -29,7 +31,7 @@ from app.application.translation import (
     fill_versions,
     translate_versions,
 )
-from app.config.prompts import MERGED_REVIEW_ADDENDUM, REVIEW_PROMPT
+from app.config.prompts import MERGED_REVIEW_ADDENDUM, REVIEW_PROMPT, screen_prompts_prompt_for
 from app.config.settings import Settings, SubtitleSettings, redacted
 from app.domain.models import (
     Cue,
@@ -43,6 +45,7 @@ from app.domain.models import (
 )
 from app.domain.names import NameFixer, known_names, prefer_named_versions, spell_names
 from app.domain.quality import HallucinationDetector, apply_corrections
+from app.domain.screen_prompts import PromptScan
 from app.domain.segmentation import SegmentationRules, UnitBuilder
 from app.domain.subtitles import CueBuilder, CueRules
 
@@ -64,6 +67,8 @@ class Stage(StrEnum):
     REVIEW = "review"
     TRANSLATION = "translate"
     CUES = "cues"
+    SCREEN_SCAN = "screen_scan"
+    SCREEN_TRANSLATE = "screen_translate"
     EXPORT = "export"
 
 
@@ -76,8 +81,13 @@ STAGE_LABELS = {
     Stage.REVIEW: "Reviewing transcript",
     Stage.TRANSLATION: "Translating",
     Stage.CUES: "Building subtitles",
+    Stage.SCREEN_SCAN: "Reading the prompts on screen",
+    Stage.SCREEN_TRANSLATE: "Translating the prompts on screen",
     Stage.EXPORT: "Exporting",
 }
+
+PROMPT_MODEL_SHARE = 0.1
+PROMPT_TEMPLATES = "screen_prompts.npz"
 
 CACHEABLE_STAGES = [stage.value for stage in Stage if stage is not Stage.EXPORT]
 
@@ -91,6 +101,7 @@ class PipelineServices:
     create_language_model: Callable[[], LanguageModel]
     create_separator: Callable[[], VocalSeparator]
     environment: Callable[[], dict[str, Any]] = dict
+    create_prompt_reader: Callable[[], PromptReader] | None = None
 
 
 @dataclass
@@ -264,6 +275,78 @@ class Pipeline:
         finally:
             stereo.unlink(missing_ok=True)
         return result.vocals
+
+    def read_screen_prompts(self, progress: FractionCallback | None = None) -> PromptScan:
+        if self.services.create_prompt_reader is None:
+            raise PipelineError("Reading the prompts on screen is not available.")
+        reader = self.services.create_prompt_reader()
+        media = self.state.media
+        folder = self.state.work_dir
+
+        def report(start: float, share: float) -> FractionCallback:
+            def update(fraction: float) -> None:
+                if progress:
+                    progress(start + share * fraction)
+                self.progress(
+                    Stage.SCREEN_SCAN, start + share * fraction, STAGE_LABELS[Stage.SCREEN_SCAN]
+                )
+
+            return update
+
+        def compute() -> dict[str, Any]:
+            reader.prepare(report(0.0, PROMPT_MODEL_SHARE))
+            scan = reader.scan(media, report(PROMPT_MODEL_SHARE, 1.0 - PROMPT_MODEL_SHARE))
+            return reader.store(scan, folder / PROMPT_TEMPLATES)
+
+        stat = media.stat()
+        params = {
+            "media": str(media),
+            "size": stat.st_size,
+            "mtime": stat.st_mtime,
+            "reader": reader.cache_identity,
+        }
+        data = self._run_stage(Stage.SCREEN_SCAN, params, compute, require_file="templates")
+        return reader.load(data, folder)
+
+    def translate_screen_prompts(self, scan: PromptScan) -> dict[str, str]:
+        if not scan.detections:
+            return {}
+        translation = self.settings.translation
+        system_prompt = screen_prompts_prompt_for(translation.target_language)
+        model = self.services.create_language_model()
+        cues = self.state.cues
+
+        def compute() -> dict[str, Any]:
+            self._prepare_language_model(model, Stage.SCREEN_TRANSLATE)
+            return {
+                "translations": translate_prompts(
+                    model,
+                    scan.detections,
+                    scan.fps,
+                    cues,
+                    translation.target_language,
+                    system_prompt,
+                    self.name_fixer,
+                )
+            }
+
+        params = {
+            "backend": model.description,
+            "prompt": system_prompt,
+            "target": translation.target_language,
+            "names": self.name_fixer.names,
+            "speech": [cue.original for cue in cues],
+        }
+        try:
+            data = self._run_stage(
+                Stage.SCREEN_TRANSLATE,
+                params,
+                compute,
+                upstream=self.state.keys.get(Stage.SCREEN_SCAN, ""),
+            )
+        finally:
+            model.unload()
+        return data["translations"]
 
     def detect_language(self) -> LanguageDetection:
         speech_audio = self._speech_audio()

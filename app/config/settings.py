@@ -7,6 +7,7 @@ from typing import Any
 
 from app.config.prompts import translation_prompt_for
 from app.domain.audio_leveling import Leveling
+from app.domain.screen_prompts import PromptStyle
 from app.domain.subtitle_style import SubtitleStyle
 
 ANTHROPIC_KEY_VARIABLE = "ANTHROPIC_API_KEY"
@@ -80,11 +81,19 @@ class VideoSettings:
     level_audio: bool = False
     loudness_target: int = Leveling.target
     tame_loud_moments: str = Leveling.tame.value
+    translate_prompts: bool = False
+    prompt_style: str = PromptStyle.WIDEN.value
 
     def style(self) -> SubtitleStyle:
         return SubtitleStyle.from_values(
             self.text_color, self.background, self.box_opacity, self.font_size, self.position
         )
+
+    def prompts(self) -> PromptStyle:
+        try:
+            return PromptStyle(self.prompt_style)
+        except ValueError:
+            return PromptStyle.WIDEN
 
     def leveling(self) -> Leveling:
         return Leveling.from_values(self.loudness_target, self.tame_loud_moments)

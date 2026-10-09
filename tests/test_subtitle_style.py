@@ -168,10 +168,12 @@ def test_export_needs_subtitles_or_music_removal(qt_app: QApplication, sample_vi
 
 
 def test_quiet_audio_is_leveled_without_peaks(tmp_path: Path) -> None:
-    clip = make_media(
-        tmp_path / "quiet.mp4",
-        "color=c=blue:s=320x180:d=6",
-        "anoisesrc=color=pink:amplitude=0.02:d=6",
+    clip = tmp_path / "quiet.mp4"
+    sources = ["color=c=blue:s=320x180:d=6", "anoisesrc=color=pink:amplitude=0.02:d=6:seed=7"]
+    inputs = [part for source in sources for part in ("-f", "lavfi", "-i", source)]
+    subprocess.run(
+        [ffmpeg_executable(), "-hide_banner", "-loglevel", "error", *inputs, "-t", "6", str(clip)],
+        check=True,
     )
     before = measure_loudness(clip)
     output = render_video(clip, tmp_path / "leveled.mp4", leveling=Leveling())

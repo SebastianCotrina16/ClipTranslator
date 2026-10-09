@@ -98,7 +98,7 @@ class FfmpegAudio:
 PREVIEW_SECONDS = 60.0
 AUDIO_ONLY_SUFFIXES = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".opus"}
 PROGRESS_KEYS = ("out_time_us=", "out_time_ms=")
-REENCODE = ["-c:v", "libx264", "-crf", "18", "-preset", "medium"]
+REENCODE = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-preset", "medium"]
 CLEAN_AUDIO = ["-c:a", "aac", "-b:a", "192k", "-ar", "48000"]
 PREVIEW_AUDIO_SECONDS = 10.0
 LOUDNESS_RATE = 8_000
@@ -111,6 +111,32 @@ MEASURED_FIELDS = {
     "offset": "target_offset",
 }
 JSON_BLOCK = re.compile(r"\{[^{}]*\}")
+VIDEO_SIZE = re.compile(r"Video:.*?(\d{2,5})x(\d{2,5})")
+VIDEO_RATE = re.compile(r"([\d.]+) (?:fps|tbr)")
+DURATION = re.compile(r"Duration: (\d+):(\d+):([\d.]+)")
+FrameFilter = Callable[[int, np.ndarray], object]
+
+
+def video_info(media: Path) -> tuple[int, int, float, float]:
+    command = [ffmpeg_executable(), "-hide_banner", "-i", str(media)]
+    details = run_hidden(
+        command, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
+    report = details.stderr or ""
+    size, rate, length = (
+        VIDEO_SIZE.search(report),
+        VIDEO_RATE.search(report),
+        DURATION.search(report),
+    )
+    if size is None or rate is None:
+        raise FfmpegError(f"Could not read the video size of {media.name}.")
+    hours, minutes, seconds = (float(part) for part in length.groups()) if length else (0, 0, 0)
+    return (
+        int(size.group(1)),
+        int(size.group(2)),
+        float(rate.group(1)),
+        hours * 3600 + minutes * 60 + seconds,
+    )
 
 
 def has_video(media: Path) -> bool:
@@ -137,7 +163,12 @@ def render_video(
     duration: float | None = None,
     progress: Callable[[float], None] | None = None,
     leveling: Leveling | None = None,
+    frame_filter: FrameFilter | None = None,
 ) -> Path:
+    if frame_filter is not None:
+        audio_filter = loudness_filter(audio or media, leveling) if leveling else None
+        draw = (subtitles, style or SubtitleStyle()) if subtitles is not None else None
+        return _render_frames(media, output, draw, audio, audio_filter, progress, frame_filter)
     if subtitles is not None:
         video = ["-vf", subtitle_filter(subtitles, style or SubtitleStyle()), *REENCODE]
     else:
@@ -168,6 +199,69 @@ def _video_command(
         command += ["-af", leveling] if leveling else []
         command += CLEAN_AUDIO
     return [*command, "-progress", "pipe:1", "-nostats", str(output)]
+
+
+def _render_frames(
+    media: Path,
+    output: Path,
+    subtitles: tuple[Path, SubtitleStyle] | None,
+    audio: Path | None,
+    audio_filter: str | None,
+    progress: Callable[[float], None] | None,
+    frame_filter: FrameFilter,
+) -> Path:
+    width, height, fps, duration = video_info(media)
+    total = max(int(duration * fps), 1)
+    reader_command = [ffmpeg_executable(), "-v", "error", "-i", str(media), "-f", "rawvideo"]
+    reader_command += ["-pix_fmt", "bgr24", "-"]
+    writer_command = [ffmpeg_executable(), "-hide_banner", "-loglevel", "error", "-y"]
+    writer_command += ["-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{width}x{height}"]
+    writer_command += ["-r", f"{fps}", "-i", "-", "-i", str(audio or media), "-map", "0:v:0"]
+    writer_command += ["-map", "1:a:0?"]
+    if subtitles is not None:
+        writer_command += ["-vf", subtitle_filter(*subtitles)]
+    writer_command += REENCODE
+    if audio is not None or audio_filter:
+        writer_command += ["-af", audio_filter] if audio_filter else []
+        writer_command += CLEAN_AUDIO
+    else:
+        writer_command += ["-c:a", "copy"]
+    writer_command += ["-shortest", str(output)]
+    size = width * height * 3
+    with tempfile.TemporaryFile() as errors:
+        reader = subprocess.Popen(
+            reader_command, stdout=subprocess.PIPE, creationflags=HIDDEN_WINDOW
+        )
+        writer = subprocess.Popen(
+            writer_command, stdin=subprocess.PIPE, stderr=errors, creationflags=HIDDEN_WINDOW
+        )
+        index = 0
+        try:
+            while reader.stdout is not None and writer.stdin is not None:
+                raw = reader.stdout.read(size)
+                if len(raw) < size:
+                    break
+                frame = np.frombuffer(raw, np.uint8).reshape(height, width, 3).copy()
+                frame_filter(index, frame)
+                writer.stdin.write(frame.tobytes())
+                index += 1
+                if progress and index % 10 == 0:
+                    progress(min(index / total, 1.0))
+        except BrokenPipeError:
+            pass
+        finally:
+            reader.kill()
+            reader.wait()
+            if writer.stdin is not None:
+                writer.stdin.close()
+            writer.wait()
+        if writer.returncode != 0:
+            errors.seek(0)
+            detail = errors.read().decode("utf-8", "replace").strip()
+            raise FfmpegError(f"ffmpeg failed: {detail[-500:]}")
+    if progress:
+        progress(1.0)
+    return output
 
 
 def loudness_filter(source: Path, leveling: Leveling) -> str:

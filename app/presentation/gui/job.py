@@ -12,17 +12,20 @@ from app.application.updates import Installer, newer_release
 from app.bootstrap import create_pipeline
 from app.config.settings import Settings
 from app.domain.audio_leveling import Leveling
+from app.domain.screen_prompts import PromptStyle
 from app.domain.subtitle_style import SubtitleStyle
 from app.infrastructure.ffmpeg import render_video
 from app.infrastructure.github_releases import GitHubReleases, installed_version
 from app.infrastructure.gpu import sustained_utilization
+from app.infrastructure.prompt_renderer import PromptRenderer
 from app.infrastructure.self_update import download_installer
 from app.infrastructure.subtitle_files import video_name
 
 log = logging.getLogger(__name__)
 
 BUSY_GPU_PERCENT = 50
-MUSIC_REMOVAL_SHARE = 0.5
+MUSIC_REMOVAL_WEIGHT = 1.0
+PROMPT_SCAN_WEIGHT = 0.6
 STAGE_ORDER = [
     Stage.AUDIO,
     Stage.SEPARATION,
@@ -157,28 +160,36 @@ class ExportVideoJob(QObject):
         style: SubtitleStyle | None,
         remove_music: bool = False,
         leveling: Leveling | None = None,
+        prompts: PromptStyle | None = None,
     ) -> None:
         super().__init__()
         self._pipeline = pipeline
         self._style = style
         self._remove_music = remove_music
         self._leveling = leveling
+        self._prompts = prompts
 
     @Slot()
     def run(self) -> None:
         try:
             media = self._pipeline.state.media
             subtitled, leveled = self._style is not None, self._leveling is not None
-            name = video_name(media, subtitled, self._remove_music, leveled)
+            prompts = self._prompts is not None
+            name = video_name(media, subtitled, self._remove_music, leveled, prompts)
             output = media.with_name(name)
-            subtitles = self._pipeline.export(extras=False)[0] if self._style is not None else None
-            audio = None
-            start = 0.0
-            if self._remove_music:
-                start = MUSIC_REMOVAL_SHARE
-                audio = self._pipeline.voice_audio(
-                    lambda fraction: self.progressed.emit(start * fraction)
+            subtitles = self._pipeline.export(extras=False)[0] if subtitled else None
+            shares = self._shares()
+            frame_filter = None
+            if self._prompts is not None:
+                scan = self._pipeline.read_screen_prompts(self._reporter(shares, "prompts"))
+                translations = self._pipeline.translate_screen_prompts(scan)
+                renderer = PromptRenderer(
+                    scan.detections, scan.templates, translations, scan.fps, self._prompts
                 )
+                frame_filter = renderer.apply if renderer.active else None
+            audio = None
+            if self._remove_music:
+                audio = self._pipeline.voice_audio(self._reporter(shares, "music"))
             render_video(
                 media,
                 output,
@@ -186,14 +197,32 @@ class ExportVideoJob(QObject):
                 self._style,
                 audio,
                 self._pipeline.state.duration,
-                lambda fraction: self.progressed.emit(start + (1.0 - start) * fraction),
+                self._reporter(shares, "video"),
                 self._leveling,
+                frame_filter,
             )
         except Exception as error:
             log.exception("Exporting the video failed")
             self.failed.emit(str(error))
             return
         self.succeeded.emit(output)
+
+    def _shares(self) -> dict[str, tuple[float, float]]:
+        weights = {
+            "prompts": PROMPT_SCAN_WEIGHT if self._prompts is not None else 0.0,
+            "music": MUSIC_REMOVAL_WEIGHT if self._remove_music else 0.0,
+            "video": 1.0,
+        }
+        total = sum(weights.values())
+        shares, start = {}, 0.0
+        for step, weight in weights.items():
+            shares[step] = (start / total, weight / total)
+            start += weight
+        return shares
+
+    def _reporter(self, shares: dict[str, tuple[float, float]], step: str):
+        start, share = shares[step]
+        return lambda fraction: self.progressed.emit(start + share * fraction)
 
 
 class UpdateDownloadJob(QObject):

@@ -8,6 +8,7 @@ from typing import Any, Protocol
 import numpy as np
 
 from app.domain.models import LanguageGuess, Segment
+from app.domain.screen_prompts import PromptScan
 
 FractionCallback = Callable[[float], None]
 
@@ -88,3 +89,16 @@ class SubtitleWriter(Protocol):
         vtt: bool,
         extras: bool,
     ) -> list[Path]: ...
+
+
+class PromptReader(Protocol):
+    @property
+    def cache_identity(self) -> dict[str, Any]: ...
+
+    def prepare(self, progress: FractionCallback | None = None) -> None: ...
+
+    def scan(self, media: Path, progress: FractionCallback | None = None) -> PromptScan: ...
+
+    def store(self, scan: PromptScan, path: Path) -> dict[str, Any]: ...
+
+    def load(self, data: dict[str, Any], folder: Path) -> PromptScan: ...

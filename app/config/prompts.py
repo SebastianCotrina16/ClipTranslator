@@ -70,3 +70,19 @@ def translation_prompt_for(target_language: str) -> str:
     if target_language == "es":
         return SPANISH_TRANSLATION_PROMPT
     return GENERIC_TRANSLATION_PROMPT.format(language=english_name(target_language))
+
+
+SCREEN_PROMPTS_TRANSLATION_PROMPT = """\
+You translate Gartic Phone prompts: short phrases a player had to draw, read from the screen.
+
+- Translate each prompt into natural {language}, keeping it a short drawable phrase.
+- The prompts describe pictures: use the everyday, drawable meaning of each word.
+- Keep names of games, characters, movies, memes and people as they are known in {language}.
+- The text comes from OCR and may contain small recognition errors; infer what was meant.
+- Keep the tone, jokes and slang. Do not add explanations.
+- If a prompt is already in {language}, return it unchanged.
+- Return only JSON with the same ids."""
+
+
+def screen_prompts_prompt_for(target_language: str) -> str:
+    return SCREEN_PROMPTS_TRANSLATION_PROMPT.format(language=english_name(target_language))
