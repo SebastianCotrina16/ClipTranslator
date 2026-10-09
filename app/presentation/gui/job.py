@@ -9,7 +9,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 from app.application.pipeline import Pipeline, Stage
 from app.application.updates import Installer, newer_release
-from app.bootstrap import create_pipeline
+from app.bootstrap import SharedModels, create_pipeline
 from app.config.settings import Settings
 from app.domain.audio_leveling import Leveling
 from app.domain.screen_prompts import PromptStyle
@@ -26,6 +26,7 @@ log = logging.getLogger(__name__)
 BUSY_GPU_PERCENT = 50
 MUSIC_REMOVAL_WEIGHT = 1.0
 PROMPT_SCAN_WEIGHT = 0.6
+PREPARE_STAGES = [Stage.AUDIO, Stage.SEPARATION, Stage.LANGUAGE, Stage.TRANSCRIPTION]
 STAGE_ORDER = [
     Stage.AUDIO,
     Stage.SEPARATION,
@@ -65,10 +66,13 @@ class SubtitleJob(QObject):
     cancelled = Signal()
     failed = Signal(str)
 
-    def __init__(self, request: JobRequest, settings: Settings) -> None:
+    def __init__(
+        self, request: JobRequest, settings: Settings, shared: SharedModels | None = None
+    ) -> None:
         super().__init__()
         self._request = request
         self._settings = settings
+        self._shared = shared
         self._cancel = threading.Event()
         self._owner: threading.Thread | None = None
 
@@ -80,7 +84,9 @@ class SubtitleJob(QObject):
         self._owner = threading.current_thread()
         try:
             self._warn_if_gpu_busy()
-            pipeline = create_pipeline(self._request.media, self._settings, self._report)
+            pipeline = create_pipeline(
+                self._request.media, self._settings, self._report, shared=self._shared
+            )
             self._process(pipeline)
         except JobCancelledError:
             self.cancelled.emit()
@@ -126,6 +132,75 @@ class SubtitleJob(QObject):
         self.progressed.emit(overall_progress(stage, fraction), stage)
         if threading.current_thread() is self._owner:
             self._stop_if_cancelled()
+
+
+class PrepareJob(QObject):
+    progressed = Signal(float, str)
+    clip_started = Signal(object)
+    clip_prepared = Signal(object)
+    clip_failed = Signal(object, str)
+    language_detected = Signal(str, float)
+    succeeded = Signal()
+    cancelled = Signal()
+
+    def __init__(
+        self, requests: list[JobRequest], settings: Settings, shared: SharedModels
+    ) -> None:
+        super().__init__()
+        self._requests = requests
+        self._settings = settings
+        self._shared = shared
+        self._cancel = threading.Event()
+        self._number = 0
+
+    def cancel(self) -> None:
+        self._cancel.set()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            for number, request in enumerate(self._requests):
+                self._number = number
+                if self._cancel.is_set():
+                    raise JobCancelledError
+                self.clip_started.emit(request.media)
+                try:
+                    self._prepare(request)
+                except JobCancelledError:
+                    raise
+                except Exception as error:
+                    log.exception("Preparing %s failed", request.media)
+                    self.clip_failed.emit(request.media, str(error))
+                    continue
+                self.clip_prepared.emit(request.media)
+        except JobCancelledError:
+            self._shared.release()
+            self.cancelled.emit()
+            return
+        self._shared.release_transcriber()
+        self.succeeded.emit()
+
+    def _prepare(self, request: JobRequest) -> None:
+        pipeline = create_pipeline(request.media, self._settings, self._report, shared=self._shared)
+        pipeline.isolate_speech()
+        if request.source_language:
+            pipeline.set_language(request.source_language)
+        else:
+            detection = pipeline.detect_language()
+            self.language_detected.emit(detection.language, detection.probability)
+        pipeline.transcribe()
+        pipeline.record_run()
+
+    def _report(self, stage: str, fraction: float, message: str) -> None:
+        if self._cancel.is_set():
+            raise JobCancelledError
+        try:
+            step = PREPARE_STAGES.index(Stage(stage))
+        except ValueError:
+            return
+        inside = (step + min(max(fraction, 0.0), 1.0)) / len(PREPARE_STAGES)
+        overall = (self._number + inside) / max(len(self._requests), 1)
+        self.progressed.emit(overall, stage)
 
 
 class RetranslateJob(QObject):

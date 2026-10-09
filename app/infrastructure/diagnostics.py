@@ -83,6 +83,9 @@ def describe_run(entry: dict[str, Any]) -> str:
     for stage in entry.get("stages", []):
         if stage.get("stage") == "transcribe" and stage.get("detail"):
             lines.append(f"  whisper: {stage['detail']}")
+        if stage.get("stage") in ("review", "translate") and '"model"' in stage.get("detail", ""):
+            model = json.loads(stage["detail"]).get("model", {})
+            lines.append(f"  {stage['stage']} model: {json.dumps(model)}")
     for warning in entry.get("warnings", []):
         lines.append(f"  warning: {warning}")
     return "\n".join(lines)

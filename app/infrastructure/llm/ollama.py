@@ -18,6 +18,19 @@ MIN_CONTEXT = 4096
 MAX_CONTEXT = 65536
 
 
+NANOSECONDS = 1e9
+RELOAD_SECONDS = 1.0
+TIMING_FIELDS = {
+    "load_seconds": "load_duration",
+    "read_seconds": "prompt_eval_duration",
+    "write_seconds": "eval_duration",
+}
+
+
+def empty_timings() -> dict[str, float]:
+    return {"requests": 0, "loads": 0, **{name: 0.0 for name in TIMING_FIELDS}}
+
+
 def context_size_for(system: str, user: str) -> int:
     estimated_tokens = (len(system) + len(user)) // 3
     needed = estimated_tokens * 3 + 512
@@ -40,6 +53,8 @@ class OllamaModel:
         self.temperature = temperature
         self.cpu_threads = cpu_threads
         self._client = httpx.Client(timeout=httpx.Timeout(1800.0, connect=10.0))
+        self._context = 0
+        self._timings = empty_timings()
 
     @property
     def description(self) -> str:
@@ -104,9 +119,10 @@ class OllamaModel:
             progress(event.get("completed", 0) / event["total"], event.get("status", ""))
 
     def complete(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
+        self._context = max(self._context, context_size_for(system, user))
         options: dict[str, Any] = {
             "temperature": self.temperature,
-            "num_ctx": context_size_for(system, user),
+            "num_ctx": self._context,
         }
         if self.cpu_threads:
             options["num_thread"] = self.cpu_threads
@@ -128,9 +144,21 @@ class OllamaModel:
                 raise
             payload.pop("think")
             data = post_json(self._client, f"{self.url}/api/chat", payload, "Ollama")
+        self._record(data)
         return parse_json_object(data["message"]["content"])
 
+    def take_timings(self) -> dict[str, float]:
+        taken, self._timings = self._timings, empty_timings()
+        return {name: round(value, 2) for name, value in taken.items()}
+
+    def _record(self, data: dict[str, Any]) -> None:
+        self._timings["requests"] += 1
+        for name, field in TIMING_FIELDS.items():
+            self._timings[name] += data.get(field, 0) / NANOSECONDS
+        self._timings["loads"] += data.get("load_duration", 0) / NANOSECONDS > RELOAD_SECONDS
+
     def unload(self) -> None:
+        self._context = 0
         with contextlib.suppress(httpx.HTTPError):
             self._client.post(
                 f"{self.url}/api/generate", json={"model": self.model, "keep_alive": 0}

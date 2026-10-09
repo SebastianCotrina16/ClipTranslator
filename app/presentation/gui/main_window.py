@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from app.application.pipeline import Pipeline
 from app.application.updates import Release
+from app.bootstrap import SharedModels
 from app.config.session import SavedClip, Session, SessionStore
 from app.config.store import SettingsStore, data_dir
 from app.domain.languages import ENGLISH_NAMES, TARGET_LANGUAGES
@@ -46,6 +47,7 @@ from app.presentation.gui.icons import app_icon, logo_pixmap
 from app.presentation.gui.job import (
     ExportVideoJob,
     JobRequest,
+    PrepareJob,
     RetranslateJob,
     SubtitleJob,
     UpdateCheckJob,
@@ -99,6 +101,7 @@ class MainWindow(QMainWindow):
         self._pipeline: Pipeline | None = None
         self._files: list[Path] = []
         self._queue_active = False
+        self._shared: SharedModels | None = None
         self._queue_total = 0
         self._release: Release | None = None
         self._updating = False
@@ -402,18 +405,24 @@ class MainWindow(QMainWindow):
         if self._clips.status(path) in (ClipStatus.READY, ClipStatus.EXPORTED):
             self._start()
 
-    def _start(self) -> None:
-        if self._media is None or self._runner.busy or self._updating:
-            return
+    def _remember_choices(self) -> None:
         self._settings.translation.target_language = self._target.currentData()
         self._settings.transcription.names = self._names.text().strip()
         self._store.save(self._settings)
-        request = JobRequest(
-            media=self._media,
+
+    def _request_for(self, media: Path) -> JobRequest:
+        return JobRequest(
+            media=media,
             source_language=self._source.currentData() or None,
             clip_context=self._context.text().strip(),
         )
-        job = SubtitleJob(request, self._settings)
+
+    def _start(self) -> None:
+        if self._media is None or self._runner.busy or self._updating:
+            return
+        self._remember_choices()
+        request = self._request_for(self._media)
+        job = SubtitleJob(request, self._settings, self._shared if self._queue_active else None)
         job.progressed.connect(self._on_progress)
         job.busy_gpu.connect(
             lambda percent: self._notices.add(
@@ -441,8 +450,29 @@ class MainWindow(QMainWindow):
             self._stage.setText("There are no pending clips.")
             return
         self._queue_active = True
-        self._queue_total = len(self._clips.with_status(ClipStatus.PENDING))
-        self._start_next_in_queue()
+        pending = self._clips.with_status(ClipStatus.PENDING)
+        self._queue_total = len(pending)
+        self._remember_choices()
+        self._shared = SharedModels(self._settings)
+        job = PrepareJob(
+            [self._request_for(path) for path in pending], self._settings, self._shared
+        )
+        job.progressed.connect(
+            lambda overall, stage: self._set_progress(
+                overall, f"Transcribing all clips first · {stage_label(stage)}…"
+            )
+        )
+        job.clip_started.connect(lambda path: self._clips.set_status(path, ClipStatus.PROCESSING))
+        job.clip_prepared.connect(lambda path: self._clips.set_status(path, ClipStatus.PENDING))
+        job.clip_failed.connect(self._on_prepare_failed)
+        job.cancelled.connect(lambda: self._set_progress(0.0, "Cancelled."))
+        self._set_progress(0.0, "Transcribing all clips first…")
+        self._runner.start(job, ("succeeded", "cancelled"))
+        self._update_buttons()
+
+    def _on_prepare_failed(self, path: Path, message: str) -> None:
+        self._clips.set_status(path, ClipStatus.FAILED)
+        self._notices.add(f"{path.name}: {message}")
 
     def _start_next_in_queue(self) -> None:
         pending = self._clips.with_status(ClipStatus.PENDING)
@@ -456,6 +486,7 @@ class MainWindow(QMainWindow):
         if not self._queue_active:
             return
         self._queue_active = False
+        self._release_shared()
         exported = len(self._clips.with_status(ClipStatus.EXPORTED))
         failed = len(self._clips.with_status(ClipStatus.FAILED))
         self._set_progress(1.0, f"Queue finished: {exported} exported, {failed} failed.")
@@ -467,9 +498,14 @@ class MainWindow(QMainWindow):
         done = self._queue_total - len(self._clips.with_status(ClipStatus.PENDING))
         return f"Clip {max(done, 1)} of {self._queue_total} · {message}"
 
+    def _release_shared(self) -> None:
+        if self._shared is not None:
+            self._shared.release()
+            self._shared = None
+
     def _cancel(self) -> None:
         job = self._runner.job
-        if isinstance(job, SubtitleJob):
+        if isinstance(job, SubtitleJob | PrepareJob):
             job.cancel()
             self._queue_active = False
             self._cancel_button.setEnabled(False)
@@ -513,6 +549,8 @@ class MainWindow(QMainWindow):
         self._update_buttons()
         if self._queue_active:
             QTimer.singleShot(0, self._start_next_in_queue)
+        else:
+            self._release_shared()
 
     def _on_cues_edited(self) -> None:
         self._player.refresh_caption()
@@ -855,7 +893,7 @@ class MainWindow(QMainWindow):
 
     def _update_buttons(self) -> None:
         running = self._runner.busy
-        processing = running and isinstance(self._runner.job, SubtitleJob)
+        processing = running and isinstance(self._runner.job, SubtitleJob | PrepareJob)
         has_result = self._pipeline is not None
         editable = has_result and not running
         stack = self._model.undo_stack

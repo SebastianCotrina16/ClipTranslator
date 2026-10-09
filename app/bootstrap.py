@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from collections.abc import Callable
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -62,13 +63,46 @@ def build_services(settings: Settings) -> PipelineServices:
     )
 
 
+class SharedModels:
+    def __init__(self, settings: Settings) -> None:
+        base = build_services(settings)
+        self._made: dict[str, Any] = {}
+        self.services = replace(
+            base,
+            create_transcriber=self._once("transcriber", base.create_transcriber),
+            create_language_model=self._once("language_model", base.create_language_model),
+        )
+
+    def _once(self, name: str, factory: Callable[[], Any]) -> Callable[[], Any]:
+        def make() -> Any:
+            if name not in self._made:
+                self._made[name] = factory()
+            return self._made[name]
+
+        return make
+
+    def release_transcriber(self) -> None:
+        transcriber = self._made.pop("transcriber", None)
+        if transcriber is not None:
+            transcriber.unload()
+
+    def release(self) -> None:
+        for made in self._made.values():
+            made.unload()
+        self._made.clear()
+
+
 def create_pipeline(
     media: Path,
     settings: Settings,
     progress: ProgressCallback | None = None,
     force: set[str] | None = None,
+    shared: SharedModels | None = None,
 ) -> Pipeline:
     if settings.performance.low_impact:
         lower_current_process_priority()
     work_dir = settings.work_root(data_dir() / "work") / safe_stem(media.stem)
-    return Pipeline(media, settings, build_services(settings), work_dir, progress, force)
+    services = shared.services if shared is not None else build_services(settings)
+    pipeline = Pipeline(media, settings, services, work_dir, progress, force)
+    pipeline.keep_language_model = shared is not None
+    return pipeline

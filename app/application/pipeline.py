@@ -167,6 +167,7 @@ class Pipeline:
         self.edits = EditStore(work_dir)
         self._transcriber: Transcriber | None = None
         self._language_model: LanguageModel | None = None
+        self.keep_language_model = False
 
     @property
     def cue_rules(self) -> CueRules:
@@ -447,6 +448,7 @@ class Pipeline:
         }
         try:
             data = self._run_stage(Stage.REVIEW, params, compute, upstream=units_key)
+            self._note_model_timings(model)
         except LanguageModelError as error:
             self._warn(f"Could not review the transcript ({error}); using it as is.")
             self.state.keys[Stage.REVIEW] = units_key + "-failed"
@@ -515,7 +517,8 @@ class Pipeline:
                 Stage.TRANSLATION, params, compute, upstream=self.state.keys[Stage.REVIEW]
             )
         finally:
-            model.unload()
+            if not self.keep_language_model:
+                model.unload()
         apply_corrections(units, data.get("corrections", {}))
         versions = data.get("versions", {})
         for unit in units:
@@ -523,6 +526,7 @@ class Pipeline:
             fill_versions(unit, versions.get(str(unit.id), []))
         prefer_named_versions(spell_names(units, self.name_fixer), self.name_fixer)
         self.state.records[-1].detail = json.dumps(data["report"], ensure_ascii=False)
+        self._note_model_timings(model)
         if data["report"]["untranslated"]:
             self.cache.invalidate(Stage.TRANSLATION)
         return units
@@ -626,6 +630,15 @@ class Pipeline:
             self._language_model.unload()
         return units
 
+    def _note_model_timings(self, model: LanguageModel) -> None:
+        take = getattr(model, "take_timings", None)
+        record = self.state.records[-1]
+        if take is None or record.cached:
+            return
+        details = json.loads(record.detail) if record.detail else {}
+        details["model"] = take()
+        record.detail = json.dumps(details, ensure_ascii=False)
+
     def _prepare_language_model(self, model: LanguageModel, stage: Stage) -> None:
         def report_download(fraction: float, status: str) -> None:
             self.progress(stage, fraction * 0.5, f"Downloading model: {status}")
@@ -676,6 +689,9 @@ class Pipeline:
         suffix = " (cached)" if result.from_cache else f" ({elapsed:.1f} s)"
         self.progress(stage, 1.0, STAGE_LABELS[stage] + suffix)
         return result.data
+
+    def record_run(self) -> None:
+        self._append_run_log()
 
     def _append_run_log(self) -> None:
         entry = {
