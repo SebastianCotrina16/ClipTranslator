@@ -12,7 +12,7 @@ from app.application.updates import Installer, Release
 from app.config.session import SavedClip, Session, SessionStore
 from app.config.store import SettingsStore
 from app.domain.models import Cue
-from app.infrastructure.github_releases import DOWNLOADS, installer_from
+from app.infrastructure.github_releases import DOWNLOADS, installed_version, installer_from
 from app.infrastructure.self_update import UpdateError, download_installer
 from app.presentation.gui.clip_queue import ClipStatus
 from app.presentation.gui.cue_table import Column
@@ -162,3 +162,10 @@ def test_open_edit_is_kept_before_closing(qt_app: QApplication, tmp_path: Path) 
     window._finish_editing()
     assert window._model.cue_at(0).translation == "hello there"
     window.close()
+
+
+def test_the_installed_version_is_shown(qt_app: QApplication, tmp_path: Path) -> None:
+    window = window_with(tmp_path)
+    version = installed_version()
+    assert window._version.text() == f"Version {version}"
+    assert window.windowTitle() == f"ClipTranslator {version}"

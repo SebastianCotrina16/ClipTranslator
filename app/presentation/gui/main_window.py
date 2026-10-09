@@ -38,6 +38,7 @@ from app.domain.models import Cue
 from app.domain.subtitles import format_for_screen
 from app.infrastructure.diagnostics import create_report, report_name
 from app.infrastructure.ffmpeg import has_video
+from app.infrastructure.github_releases import installed_version
 from app.infrastructure.self_update import can_update_itself, launch_installer
 from app.presentation.gui.background import BackgroundRunner
 from app.presentation.gui.clip_queue import ClipList, ClipStatus
@@ -120,6 +121,7 @@ class MainWindow(QMainWindow):
         self._target = QComboBox()
         self._context = QLineEdit()
         self._names = QLineEdit()
+        self._version = QLabel(f"Version {installed_version()}")
         self._start_button = icon_button("Generate subtitles", "sparkles", "primary")
         self._cancel_button = icon_button("Cancel", "stop", "danger")
         self._progress = QProgressBar()
@@ -173,7 +175,7 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _build(self) -> None:
-        self.setWindowTitle("ClipTranslator")
+        self.setWindowTitle(f"ClipTranslator {installed_version()}")
         self.setWindowIcon(app_icon())
         self.resize(*WINDOW_SIZE)
         self._configure_widgets()
@@ -181,7 +183,7 @@ class MainWindow(QMainWindow):
         root = QWidget()
         root.setObjectName("root")
         layout = QVBoxLayout(root)
-        layout.setContentsMargins(24, 20, 24, 24)
+        layout.setContentsMargins(24, 20, 24, 10)
         layout.setSpacing(16)
         layout.addLayout(self._header())
         layout.addWidget(self._banner)
@@ -190,6 +192,10 @@ class MainWindow(QMainWindow):
         body.addWidget(self._sidebar())
         body.addWidget(self._workspace(), stretch=1)
         layout.addLayout(body, stretch=1)
+        footer = QHBoxLayout()
+        footer.addStretch(1)
+        footer.addWidget(self._version)
+        layout.addLayout(footer)
         self.setCentralWidget(root)
         self._update_buttons()
         if self._first_run:
@@ -209,6 +215,8 @@ class MainWindow(QMainWindow):
         self._progress.setTextVisible(False)
         self._percent.setObjectName("percent")
         self._stage.setObjectName("muted")
+        self._version.setObjectName("muted")
+        self._version.setToolTip("The ClipTranslator version installed on this computer.")
         self._stage.setWordWrap(True)
         self._summary.setObjectName("muted")
         self._cancel_button.hide()
