@@ -61,6 +61,7 @@ class FasterWhisperTranscriber:
         self._models_dir = models_dir
         self._model: Any = None
         self.last_run: dict[str, Any] = {}
+        self._task = "transcribe"
 
     @classmethod
     def with_hardware_defaults(
@@ -104,7 +105,9 @@ class FasterWhisperTranscriber:
         language: str,
         initial_prompt: str | None = None,
         progress: FractionCallback | None = None,
+        task: str = "transcribe",
     ) -> list[Segment]:
+        self._task = task
         recover = self.options.vad and self.options.recover_skipped_speech
         first_share = FIRST_PASS_SHARE if recover else 1.0
         started = time.monotonic()
@@ -224,6 +227,7 @@ class FasterWhisperTranscriber:
         raw_segments, info = (model or self._loaded_model()).transcribe(
             audio,
             language=language,
+            task=self._task,
             beam_size=o.beam_size,
             temperature=list(TEMPERATURE_FALLBACK),
             condition_on_previous_text=False,

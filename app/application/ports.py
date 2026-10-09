@@ -28,6 +28,7 @@ class Transcriber(Protocol):
         language: str,
         initial_prompt: str | None = None,
         progress: FractionCallback | None = None,
+        task: str = "transcribe",
     ) -> list[Segment]: ...
 
     def unload(self) -> None: ...

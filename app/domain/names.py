@@ -6,8 +6,11 @@ from collections.abc import Iterable
 
 from app.domain.models import Unit
 
-ALWAYS_SPELLED = ("Gevo",)
+ALWAYS_SPELLED = ("Gevo", "GevoArt")
 MISHEARD_AS = {"Gevo": ("Geo",)}
+MISHEARD_PHRASES = {
+    "GevoArt": ("Gevo Aat", "Gevo Art", "Gevo Arts", "Gevo Aart", "Gevo board", "Jibo Art")
+}
 MIN_FUZZY_LENGTH = 4
 WORD = re.compile(r"[^\W\d_]+(?:['’\-][^\W\d_]+)*")
 POSSESSIVE = re.compile(r"['’]s$", re.IGNORECASE)
@@ -61,6 +64,11 @@ class NameFixer:
         for name in self.names:
             for alias in MISHEARD_AS.get(name, ()):
                 self._names.setdefault(sound_key(alias), name)
+        self._phrases = [
+            (re.compile(rf"\b{re.escape(phrase)}\b", re.IGNORECASE), name)
+            for name in self.names
+            for phrase in MISHEARD_PHRASES.get(name, ())
+        ]
 
     def mentions(self, text: str | None) -> bool:
         known = {name.casefold() for name in self._names.values()}
@@ -69,6 +77,8 @@ class NameFixer:
     def fix(self, text: str | None) -> str | None:
         if not text or not self._names:
             return text
+        for pattern, name in self._phrases:
+            text = pattern.sub(name, text)
         return WORD.sub(self._replace, self._join_split_names(text))
 
     def _join_split_names(self, text: str) -> str:

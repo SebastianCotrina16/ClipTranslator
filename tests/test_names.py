@@ -11,8 +11,8 @@ FIXER = NameFixer(known_names("Kiki, Régis"))
 
 
 def test_gevo_is_always_known_and_names_are_not_repeated() -> None:
-    assert known_names("") == ("Gevo",)
-    assert known_names("kiki; Gevo,\n Régis , ") == ("Gevo", "kiki", "Régis")
+    assert known_names("") == ("Gevo", "GevoArt")
+    assert known_names("kiki; Gevo,\n Régis , ") == ("Gevo", "GevoArt", "kiki", "Régis")
 
 
 @pytest.mark.parametrize(
@@ -29,6 +29,8 @@ def test_gevo_is_always_known_and_names_are_not_repeated() -> None:
         ("Kika ! Regis ?", "Kiki ! Régis ?"),
         ("¿Quién es Geo? Es de gebo", "¿Quién es Gevo? Es de Gevo"),
         ("¿Quién es Heo? Hevo, Jeo", "¿Quién es Gevo? Gevo, Gevo"),
+        ("Wait, this Gevo board? This is Gevo Aat.", "Wait, this GevoArt? This is GevoArt."),
+        ("is this real gevoart", "is this real GevoArt"),
     ],
 )
 def test_misheard_names_are_spelled_right(heard: str, fixed: str) -> None:

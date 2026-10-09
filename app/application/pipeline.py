@@ -33,6 +33,7 @@ from app.application.translation import (
 )
 from app.config.prompts import MERGED_REVIEW_ADDENDUM, REVIEW_PROMPT, screen_prompts_prompt_for
 from app.config.settings import Settings, SubtitleSettings, redacted
+from app.domain.languages import english_name
 from app.domain.models import (
     Cue,
     LanguageDetection,
@@ -87,6 +88,16 @@ STAGE_LABELS = {
 }
 
 PROMPT_MODEL_SHARE = 0.1
+TRANSCRIBE = "transcribe"
+WHISPER_TRANSLATES = {"hi", "ur"}
+
+
+def whisper_task(language: str, target_language: str) -> str:
+    if language in WHISPER_TRANSLATES and target_language == "en":
+        return "translate"
+    return TRANSCRIBE
+
+
 PROMPT_TEMPLATES = "screen_prompts.npz"
 
 CACHEABLE_STAGES = [stage.value for stage in Stage if stage is not Stage.EXPORT]
@@ -380,6 +391,8 @@ class Pipeline:
             self.settings.transcription.initial_prompt if initial_prompt is None else initial_prompt
         )
         transcriber = self.transcriber
+        target = self.settings.translation.target_language
+        task = whisper_task(language, target)
 
         def compute_segments() -> list[dict[str, Any]]:
             segments = transcriber.transcribe(
@@ -387,15 +400,26 @@ class Pipeline:
                 language=language,
                 initial_prompt=prompt,
                 progress=self._fraction_reporter(Stage.TRANSCRIPTION),
+                task=task,
             )
             return to_records(HallucinationDetector().flag(segments))
 
+        params = {"engine": transcriber.cache_identity, "language": language, "prompt": prompt}
+        if task != TRANSCRIBE:
+            params["task"] = task
         raw_segments = self._run_stage(
             Stage.TRANSCRIPTION,
-            {"engine": transcriber.cache_identity, "language": language, "prompt": prompt},
+            params,
             compute_segments,
             upstream=self.state.keys[Stage.SEPARATION],
         )
+        if task != TRANSCRIBE:
+            self.state.language = target
+            self._warn(
+                f"This clip is in {english_name(language)}, so Whisper wrote it straight in "
+                f"{english_name(target)}: it understands {english_name(language)} mixed with "
+                "English better than a separate translation."
+            )
         details = getattr(transcriber, "last_run", None)
         if details and not self.state.records[-1].cached:
             self.state.records[-1].detail = json.dumps(details)

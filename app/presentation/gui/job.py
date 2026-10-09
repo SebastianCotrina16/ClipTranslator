@@ -115,7 +115,10 @@ class SubtitleJob(QObject):
                 pipeline.set_language(self._request.source_language)
                 return
             detection = pipeline.detect_language()
-            self.language_detected.emit(detection.language, detection.probability)
+            chosen = pipeline.state.language or detection.language
+            self.language_detected.emit(
+                chosen, dict(detection.top).get(chosen, detection.probability)
+            )
 
         return resolve
 
@@ -187,7 +190,10 @@ class PrepareJob(QObject):
             pipeline.set_language(request.source_language)
         else:
             detection = pipeline.detect_language()
-            self.language_detected.emit(detection.language, detection.probability)
+            chosen = pipeline.state.language or detection.language
+            self.language_detected.emit(
+                chosen, dict(detection.top).get(chosen, detection.probability)
+            )
         pipeline.transcribe()
         pipeline.record_run()
 
