@@ -25,6 +25,7 @@ from app.domain.screen_prompts import (
 )
 from app.infrastructure.ffmpeg import ffmpeg_executable, video_info
 from app.infrastructure.process import HIDDEN_WINDOW
+from app.infrastructure.prompt_renderer import card_bounds, card_colors
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ MAX_TINT = 30
 SIDE_GAP = 8
 TITLE_TOLERANCE = 25
 CHUNK = 1 << 16
+LOOK_VERSION = 1
 
 
 class OcrModelError(RuntimeError):
@@ -186,7 +188,13 @@ class PromptScanner:
         with np.load(folder / data["templates"]) as stored:
             templates = [stored[f"arr_{number}"] for number in range(len(stored.files))]
         detections = [
-            Detection(item["frame"], tuple(item["box"]), item["text"], item.get("lines", 1))
+            Detection(
+                item["frame"],
+                tuple(item["box"]),
+                item["text"],
+                item.get("lines", 1),
+                tuple(item.get("look", ())),
+            )
             for item in data["detections"]
         ]
         return PromptScan(data["width"], data["height"], data["fps"], detections, templates)
@@ -196,6 +204,7 @@ class PromptScanner:
         return {
             "models": {name: digest for name, (_, digest) in OCR_MODELS.items()},
             "rate": SCANS_PER_SECOND,
+            "look": LOOK_VERSION,
         }
 
     def scan(self, media: Path, progress: FractionCallback | None = None) -> PromptScan:
@@ -304,7 +313,16 @@ class PromptScanner:
                 int(round(area[3])),
             )
             template = frame[box[1] : box[3], box[0] : box[2]].mean(axis=2).astype(np.float32)
-            yield Detection(index, box, text, len(group)), template
+            yield Detection(index, box, text, len(group), bubble_look(frame, box)), template
+
+
+def bubble_look(frame: np.ndarray, box: tuple[int, int, int, int]) -> tuple[int, ...]:
+    background, ink = card_colors(frame, box)
+    if background is None:
+        return ()
+    left, top, right, bottom = card_bounds(frame, box, background)
+    offsets = (box[0] - left, box[1] - top, right - box[2], bottom - box[3])
+    return (*(int(value) for value in background), *(int(value) for value in ink), *offsets)
 
 
 def gpu_available() -> bool:

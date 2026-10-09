@@ -64,6 +64,7 @@ class Detection:
     box: tuple[int, int, int, int]
     text: str
     lines: int = 1
+    look: tuple[int, ...] = ()
 
 
 def plain(text: str) -> str:

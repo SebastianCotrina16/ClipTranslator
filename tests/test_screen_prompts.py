@@ -28,6 +28,7 @@ from app.domain.screen_prompts import (
     prompt_key,
 )
 from app.domain.subtitle_style import SubtitleStyle
+from app.infrastructure.prompt_ocr import bubble_look
 from app.infrastructure.prompt_renderer import PromptRenderer, nunito
 from app.infrastructure.subtitle_files import video_name
 from app.presentation.gui.video_style_dialog import VideoStyleDialog
@@ -237,3 +238,19 @@ def test_export_can_only_translate_the_prompts(qt_app: QApplication, tmp_path: P
     assert not export.isEnabled()
     assert not dialog._prompt_box.isEnabled()
     dialog.reject()
+
+
+def test_a_fading_prompt_appears_already_translated() -> None:
+    full, box = album_frame("Lisa")
+    template = full[box[1] : box[3], box[0] : box[2]].mean(axis=2).astype(np.float32)
+    detection = Detection(10, box, "Lisa", 1, bubble_look(full, box))
+    renderer = PromptRenderer(
+        [detection], [template], {prompt_key("Lisa"): "Fox"}, 30.0, PromptStyle.FIT
+    )
+    behind = np.full_like(full, PURPLE[::-1])
+    assert renderer.apply(4, behind.copy()) == []
+    faded = np.roll((full * 0.5 + behind * 0.5).round().astype(np.uint8), 1, axis=1)
+    [placed] = renderer.apply(5, faded)
+    assert placed.text == "Fox"
+    middle = np.array(CARD) * 0.5 + np.array(PURPLE) * 0.5
+    assert np.abs(faded[305, 906][::-1] - middle).max() <= 3

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
+import cv2
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from PIL import Image, ImageDraw, ImageFont
@@ -26,6 +27,14 @@ MIN_PADDING = 8
 WIDEN_MARGIN = 120
 EDGE_MARGIN = 90
 MIN_FONT = 8
+REVEAL_SECONDS = 1.0
+REVEAL_REACH_X = 3
+REVEAL_REACH_Y = 6
+MIN_REVEAL_MATCH = 0.9
+MIN_OPACITY = 0.05
+FULL_OPACITY = 0.9
+MIN_CONTRAST = 15.0
+BEHIND_RING = 4
 
 
 @dataclass(frozen=True)
@@ -64,6 +73,28 @@ def locate(frame, box, template, near=None):
         if found is not None:
             return found
     return search(frame, box, template, SEARCH)
+
+
+def reveal_match(frame: np.ndarray, box, template: np.ndarray):
+    x0, y0, x1, y1 = box
+    height, width = template.shape
+    if template.std() < MIN_CONTRAST:
+        return None
+    top, left = max(y0 - REVEAL_REACH_Y, 0), max(x0 - REVEAL_REACH_X, 0)
+    bottom = min(y1 + REVEAL_REACH_Y, frame.shape[0])
+    right = min(x0 + width + REVEAL_REACH_X, frame.shape[1])
+    area = frame[top:bottom, left:right].mean(axis=2, dtype=np.float32)
+    if area.shape[0] < height or area.shape[1] < width:
+        return None
+    scores = cv2.matchTemplate(area, template, cv2.TM_CCOEFF_NORMED)
+    _, best, _, (dx, dy) = cv2.minMaxLoc(scores)
+    if best < MIN_REVEAL_MATCH:
+        return None
+    found = area[dy : dy + height, dx : dx + width]
+    spread = template - template.mean()
+    opacity = float(((found - found.mean()) * spread).sum() / (spread**2).sum())
+    shifted = (left + dx, top + dy, left + dx + (x1 - x0), top + dy + (y1 - y0))
+    return shifted, min(max(opacity, 0.0), 1.0)
 
 
 def card_colors(frame: np.ndarray, box):
@@ -170,10 +201,16 @@ class PromptRenderer:
         for detection, template in self._candidates(index):
             track = id(template)
             where = locate(frame, detection.box, template, self._last_seen.get(track))
-            if where is None:
+            opacity = 1.0
+            if where is None and self._may_be_appearing(index, detection):
+                revealed = reveal_match(frame, detection.box, template)
+                if revealed is not None:
+                    where, opacity = revealed
+            if where is None or opacity < MIN_OPACITY:
                 self._last_seen.pop(track, None)
                 continue
-            self._last_seen[track] = where[1]
+            if opacity >= FULL_OPACITY:
+                self._last_seen[track] = where[1]
             height = where[3] - where[1]
             if any(
                 abs(where[1] - p.box[1]) < height and abs(where[0] - p.box[0]) < 40 for p in placed
@@ -182,9 +219,16 @@ class PromptRenderer:
             if where[1] < 4 or where[3] > frame.shape[0] - 5:
                 continue
             translation = self.translations[prompt_key(detection.text)]
-            if self._draw(frame, where, translation, detection.lines):
+            fading = opacity < FULL_OPACITY and len(detection.look) == 10
+            look = detection.look if fading else None
+            drawn = self._draw(frame, where, translation, detection.lines, look, opacity)
+            if drawn:
                 placed.append(Placement(translation, where))
         return placed
+
+    def _may_be_appearing(self, index: int, detection: Detection) -> bool:
+        window = self.fps * REVEAL_SECONDS
+        return detection.frame - window <= index <= detection.frame + window
 
     def _candidates(self, index: int):
         reach = int(self.fps * TRACK_SECONDS)
@@ -201,12 +245,25 @@ class PromptRenderer:
                 spots.append(top)
                 yield detection, template
 
-    def _draw(self, frame: np.ndarray, box, translation: str, lines_before: int) -> bool:
-        background, ink = card_colors(frame, box)
-        if background is None:
-            return False
+    def _draw(
+        self,
+        frame: np.ndarray,
+        box,
+        translation: str,
+        lines_before: int,
+        look: tuple[int, ...] | None = None,
+        opacity: float = 1.0,
+    ) -> bool:
         x0, y0, x1, y1 = box
-        left, top, right, bottom = card_bounds(frame, box, background)
+        if look:
+            background, ink = np.array(look[0:3], float), np.array(look[3:6], float)
+            left, top = x0 - look[6], y0 - look[7]
+            right, bottom = x1 + look[8], y1 + look[9]
+        else:
+            background, ink = card_colors(frame, box)
+            if background is None:
+                return False
+            left, top, right, bottom = card_bounds(frame, box, background)
         padding = max(x0 - left, MIN_PADDING)
         if lines_before > 1:
             pitch = (y1 - y0) / lines_before
@@ -234,7 +291,11 @@ class PromptRenderer:
         tile = Image.fromarray(region[:, :, ::-1].copy())
         draw = ImageDraw.Draw(tile)
         fill = tuple(int(value) for value in background[::-1])
-        if (new_left, new_right) != (left, right):
+        if look:
+            draw.rounded_rectangle(
+                [new_left - a0, top - b0, new_right - a0, bottom - b0], radius=RADIUS, fill=fill
+            )
+        elif (new_left, new_right) != (left, right):
             clipped_top, clipped_bottom = y0 - top < 4, bottom - y1 < 4
             box_top = top - b0 - (RADIUS if clipped_top else 0)
             box_bottom = bottom - b0 + (RADIUS if clipped_bottom else 0)
@@ -264,8 +325,37 @@ class PromptRenderer:
                 )
             else:
                 draw.text((new_left + padding - a0, y), line, font=font, fill=color, anchor="lm")
-        region[:] = np.array(tile)[:, :, ::-1]
+        painted = np.array(tile)[:, :, ::-1]
+        if not look:
+            region[:] = painted
+            return True
+        shape = Image.new("L", tile.size, 0)
+        ImageDraw.Draw(shape).rounded_rectangle(
+            [new_left - a0, top - b0, new_right - a0, bottom - b0], radius=RADIUS, fill=255
+        )
+        mask = (np.array(shape, np.float32) / 255.0)[:, :, None]
+        behind = self._behind(frame, (new_left, top, new_right, bottom))
+        faded = (1.0 - opacity) * behind + opacity * painted.astype(np.float32)
+        region[:] = (region * (1.0 - mask) + faded * mask).round().astype(np.uint8)
         return True
+
+    def _behind(self, frame: np.ndarray, card) -> np.ndarray:
+        left, top, right, bottom = card
+        height, width = frame.shape[:2]
+        strips = [
+            frame[max(top - BEHIND_RING, 0) : max(top, 0), max(left, 0) : min(right, width)],
+            frame[
+                min(bottom, height) : min(bottom + BEHIND_RING, height),
+                max(left, 0) : min(right, width),
+            ],
+            frame[max(top, 0) : min(bottom, height), max(left - BEHIND_RING, 0) : max(left, 0)],
+            frame[
+                max(top, 0) : min(bottom, height),
+                min(right, width) : min(right + BEHIND_RING, width),
+            ],
+        ]
+        pixels = np.concatenate([strip.reshape(-1, 3) for strip in strips if strip.size])
+        return np.median(pixels, axis=0).astype(np.float32)
 
     def _natural_width(self, text: str, size: int, width: int, lines_before: int) -> int:
         font = nunito(size)
