@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.domain.models import Flag, Unit
-from app.domain.quality import HallucinationDetector, apply_corrections
+from app.domain.quality import HallucinationDetector, apply_corrections, mark_unclear
 from tests.builders import make_segment
 
 DETECTOR = HallucinationDetector()
@@ -43,3 +43,14 @@ def test_corrections_flag_word_changes_only() -> None:
     assert units[1].text == "¿Qué es eso?"
     assert units[1].flags == []
     assert units[2].asr_text is None
+
+
+def test_unclear_segments_are_flagged_without_changing_the_text() -> None:
+    units = [
+        Unit(id=0, start=0, end=1, text="we gave him things like touch tape", words=[]),
+        Unit(id=1, start=1, end=2, text="what did you make?", words=[]),
+    ]
+    mark_unclear(units, [0])
+    assert units[0].flags == [Flag.UNCLEAR]
+    assert units[0].text == "we gave him things like touch tape"
+    assert units[1].flags == []

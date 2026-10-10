@@ -178,3 +178,29 @@ def test_merged_message_asks_for_corrected_source() -> None:
     )
     assert message.startswith("First proofread this automatic Latin American Spanish transcript")
     assert '"source"' in message
+
+
+class FlaggingModel:
+    description = "flagging"
+
+    def complete(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
+        assert "unclear" in schema["properties"]["translations"]["items"]["properties"]
+        assert '"unclear": ...' in user
+        return {
+            "translations": [
+                {"id": 0, "text": "line 0", "unclear": False},
+                {"id": 1, "text": "line 1", "unclear": True},
+                {"id": 2, "text": "line 2", "unclear": "yes"},
+            ]
+        }
+
+
+def test_review_reports_the_segments_marked_unclear() -> None:
+    request = Request(Task.REVIEW, "en", "en")
+    result, report = TranslationService(FlaggingModel()).run(units(3), request, "system")
+    assert result == {0: "line 0", 1: "line 1", 2: "line 2"}
+    assert report.unclear == [1]
+
+
+def test_translation_does_not_ask_for_unclear_segments() -> None:
+    assert "unclear" not in build_user_message([{"id": 0, "text": "hola"}], SPANISH_TO_ENGLISH)

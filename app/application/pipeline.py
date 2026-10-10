@@ -45,7 +45,7 @@ from app.domain.models import (
     units_from_records,
 )
 from app.domain.names import NameFixer, known_names, prefer_named_versions, spell_names
-from app.domain.quality import HallucinationDetector, apply_corrections
+from app.domain.quality import HallucinationDetector, apply_corrections, mark_unclear
 from app.domain.screen_prompts import PromptScan
 from app.domain.segmentation import SegmentationRules, UnitBuilder
 from app.domain.subtitles import CueBuilder, CueRules
@@ -90,12 +90,22 @@ STAGE_LABELS = {
 PROMPT_MODEL_SHARE = 0.1
 TRANSCRIBE = "transcribe"
 WHISPER_TRANSLATES = {"hi", "ur"}
+MIXED_WITH_ENGLISH_SHARE = 0.2
 
 
 def whisper_task(language: str, target_language: str) -> str:
     if language in WHISPER_TRANSLATES and target_language == "en":
         return "translate"
     return TRANSCRIBE
+
+
+def spoken_language(detection: LanguageDetection, target_language: str) -> str:
+    if detection.language != "en" or target_language != "en":
+        return detection.language
+    mixed = [entry for entry in detection.top if entry[0] in WHISPER_TRANSLATES]
+    if sum(probability for _, probability in mixed) < MIXED_WITH_ENGLISH_SHARE:
+        return detection.language
+    return max(mixed, key=lambda entry: entry[1])[0]
 
 
 PROMPT_TEMPLATES = "screen_prompts.npz"
@@ -378,7 +388,9 @@ class Pipeline:
         detection = language_detection_from_record(data)
         self.state.language_detection = data
         if self.state.language is None:
-            self.state.language = detection.language
+            self.state.language = spoken_language(
+                detection, self.settings.translation.target_language
+            )
         return detection
 
     def set_language(self, code: str) -> None:
@@ -386,7 +398,9 @@ class Pipeline:
 
     def transcribe(self, initial_prompt: str | None = None) -> list[Unit]:
         speech_audio = self._speech_audio()
-        language = self.state.language or self.detect_language().language
+        if self.state.language is None:
+            self.detect_language()
+        language = self.state.language
         prompt = (
             self.settings.transcription.initial_prompt if initial_prompt is None else initial_prompt
         )
@@ -478,6 +492,7 @@ class Pipeline:
             self.state.keys[Stage.REVIEW] = units_key + "-failed"
             return units
         apply_corrections(units, data["corrections"])
+        mark_unclear(units, data["report"].get("unclear", []))
         spell_names(units, self.name_fixer)
         if data["report"]["untranslated"]:
             self.cache.invalidate(Stage.REVIEW)

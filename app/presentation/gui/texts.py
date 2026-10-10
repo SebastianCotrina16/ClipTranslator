@@ -19,6 +19,7 @@ FLAG_LABELS = {
     Flag.FAST_READING: "fast reading",
     Flag.MODELS_DISAGREE: "models disagree: click Versions",
     Flag.SECOND_MODEL: "heard by a second model",
+    Flag.UNCLEAR: "may be misheard: check it",
 }
 
 

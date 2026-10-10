@@ -53,6 +53,8 @@ for "Hollow Knight"); fix it only when you are confident.
 - Keep everything else exactly as it is: do not translate, rephrase, summarize, censor or \
 "improve" grammar, slang, dialect, repetitions or filler words.
 - If a segment has no clear error, return it unchanged. When in doubt, leave it unchanged.
+- Set "unclear" to true for a segment that still makes no sense in context after your \
+fixes (a phrase you cannot work out), so a person can check it. Do not change its text.
 - Return only JSON with the same ids."""
 
 MERGED_REVIEW_ADDENDUM = """

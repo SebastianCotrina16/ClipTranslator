@@ -16,6 +16,7 @@ class Flag(StrEnum):
     FAST_READING = "fast_reading"
     MODELS_DISAGREE = "models_disagree"
     SECOND_MODEL = "second_model"
+    UNCLEAR = "unclear"
 
 
 REVIEW_FLAGS = frozenset({Flag.MODELS_DISAGREE, Flag.SECOND_MODEL})

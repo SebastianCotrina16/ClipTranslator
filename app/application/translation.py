@@ -23,11 +23,13 @@ class Task(StrEnum):
     REVIEW_AND_TRANSLATE = "review_translate"
 
 
-def _response_schema(with_source: bool) -> dict[str, Any]:
+def _response_schema(with_source: bool = False, with_unclear: bool = False) -> dict[str, Any]:
     properties: dict[str, Any] = {"id": {"type": "integer"}}
     if with_source:
         properties["source"] = {"type": "string"}
     properties["text"] = {"type": "string"}
+    if with_unclear:
+        properties["unclear"] = {"type": "boolean"}
     return {
         "type": "object",
         "properties": {
@@ -47,8 +49,8 @@ def _response_schema(with_source: bool) -> dict[str, Any]:
 
 
 RESPONSE_SCHEMAS = {
-    Task.TRANSLATE: _response_schema(with_source=False),
-    Task.REVIEW: _response_schema(with_source=False),
+    Task.TRANSLATE: _response_schema(),
+    Task.REVIEW: _response_schema(with_unclear=True),
     Task.REVIEW_AND_TRANSLATE: _response_schema(with_source=True),
 }
 
@@ -70,6 +72,7 @@ class TranslationReport:
     untranslated: list[int] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     corrections: dict[int, str] = field(default_factory=dict)
+    unclear: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -78,6 +81,7 @@ class ValidatedResponse:
     missing: list[int]
     unexpected: list[Any]
     sources: dict[int, str] = field(default_factory=dict)
+    unclear: list[int] = field(default_factory=list)
 
 
 def build_user_message(
@@ -95,6 +99,7 @@ def build_user_message(
             "translate it."
         ]
         header = "Segments to proofread:\n"
+        answer = '{"translations": [{"id": ..., "text": ..., "unclear": ...}]}'
     elif request.task is Task.REVIEW_AND_TRANSLATE:
         parts = [
             f"First proofread this automatic {source} transcript, then translate the "
@@ -144,6 +149,7 @@ def validate_response(expected_ids: list[int], response: Any) -> ValidatedRespon
     texts: dict[int, str] = {}
     sources: dict[int, str] = {}
     unexpected: list[Any] = []
+    unclear: list[int] = []
     for entry in entries:
         if not isinstance(entry, dict):
             continue
@@ -162,8 +168,10 @@ def validate_response(expected_ids: list[int], response: Any) -> ValidatedRespon
             source = _clean(entry.get("source"))
             if source:
                 sources[item_id] = source
+            if entry.get("unclear") is True:
+                unclear.append(item_id)
     missing = [item_id for item_id in expected_ids if item_id not in texts]
-    return ValidatedResponse(texts, missing, unexpected, sources)
+    return ValidatedResponse(texts, missing, unexpected, sources, unclear)
 
 
 class TranslationService:
@@ -286,6 +294,7 @@ class TranslationService:
             )
         if request.task is Task.REVIEW_AND_TRANSLATE:
             report.corrections.update(validated.sources)
+        report.unclear.extend(validated.unclear)
         return validated.texts
 
 

@@ -102,3 +102,9 @@ def apply_corrections(units: list[Unit], corrections: dict[str, str]) -> None:
         unit.asr_text, unit.text = unit.text, corrected
         if normalize_for_comparison(corrected) != normalize_for_comparison(unit.asr_text):
             unit.flags = sorted({*unit.flags, Flag.CORRECTED})
+
+
+def mark_unclear(units: list[Unit], unclear: list[int]) -> None:
+    for unit in units:
+        if unit.id in unclear:
+            unit.flags = sorted({*unit.flags, Flag.UNCLEAR})
