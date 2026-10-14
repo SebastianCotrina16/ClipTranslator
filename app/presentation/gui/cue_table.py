@@ -47,6 +47,7 @@ def short_time(seconds: float) -> str:
 class CueTableModel(QAbstractTableModel):
     edited = Signal()
     edit_rejected = Signal(str)
+    text_corrected = Signal(int, str, str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -143,7 +144,11 @@ class CueTableModel(QAbstractTableModel):
         except InvalidTimingError as error:
             self.edit_rejected.emit(str(error))
             return False
+        before = self._value(cue, column)
         self._push(f"Edit line {cue.index}", [index.row()], mutate)
+        after = self._value(cue, column)
+        if column in TEXT_COLUMNS and after != before:
+            self.text_corrected.emit(int(column), before, after)
         return True
 
     def _mutation(self, cue: Cue, column: Column, value: str) -> Callable[[], None]:

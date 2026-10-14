@@ -11,6 +11,7 @@ from app.application.pipeline import (
     ProgressCallback,
     cue_rules_from,
 )
+from app.config.corrections import CorrectionStore
 from app.config.settings import Settings
 from app.config.store import data_dir, models_dir, whisper_models_dir
 from app.infrastructure.ffmpeg import FfmpegAudio
@@ -92,6 +93,10 @@ class SharedModels:
         self._made.clear()
 
 
+def work_dir_for(media: Path, settings: Settings) -> Path:
+    return settings.work_root(data_dir() / "work") / safe_stem(media.stem)
+
+
 def create_pipeline(
     media: Path,
     settings: Settings,
@@ -101,8 +106,9 @@ def create_pipeline(
 ) -> Pipeline:
     if settings.performance.low_impact:
         lower_current_process_priority()
-    work_dir = settings.work_root(data_dir() / "work") / safe_stem(media.stem)
+    work_dir = work_dir_for(media, settings)
     services = shared.services if shared is not None else build_services(settings)
     pipeline = Pipeline(media, settings, services, work_dir, progress, force)
     pipeline.keep_language_model = shared is not None
+    pipeline.corrections = CorrectionStore().load()
     return pipeline

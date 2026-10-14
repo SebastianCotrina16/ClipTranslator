@@ -54,6 +54,8 @@ class SettingsStore:
             settings.work_dir = raw["work_dir"]
         if isinstance(raw.get("check_for_updates"), bool):
             settings.check_for_updates = raw["check_for_updates"]
+        if isinstance(raw.get("last_seen_version"), str):
+            settings.last_seen_version = raw["last_seen_version"]
         _validate_language(settings)
         return settings
 

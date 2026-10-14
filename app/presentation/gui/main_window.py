@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QProgressBar,
+    QPushButton,
     QSplitter,
     QTableView,
     QVBoxLayout,
@@ -30,9 +31,12 @@ from PySide6.QtWidgets import (
 
 from app.application.pipeline import Pipeline
 from app.application.updates import Release
-from app.bootstrap import SharedModels
+from app.application.whats_new import unseen_notes
+from app.bootstrap import SharedModels, work_dir_for
+from app.config.corrections import CorrectionStore
 from app.config.session import SavedClip, Session, SessionStore
 from app.config.store import SettingsStore, data_dir
+from app.domain.corrections import learn
 from app.domain.languages import ENGLISH_NAMES, TARGET_LANGUAGES
 from app.domain.models import Cue
 from app.domain.subtitles import format_for_screen
@@ -42,10 +46,12 @@ from app.infrastructure.github_releases import installed_version
 from app.infrastructure.self_update import can_update_itself, launch_installer
 from app.presentation.gui.background import BackgroundRunner
 from app.presentation.gui.clip_queue import ClipList, ClipStatus
+from app.presentation.gui.corrections_dialog import CorrectionsDialog
 from app.presentation.gui.cue_table import Column, CueTableModel
 from app.presentation.gui.edit_commands import CueState
 from app.presentation.gui.icons import app_icon, logo_pixmap
 from app.presentation.gui.job import (
+    ExportAllVideosJob,
     ExportVideoJob,
     JobRequest,
     PrepareJob,
@@ -53,13 +59,16 @@ from app.presentation.gui.job import (
     SubtitleJob,
     UpdateCheckJob,
     UpdateDownloadJob,
+    VideoOptions,
 )
+from app.presentation.gui.notifications import DoneNotifier
 from app.presentation.gui.player import SubtitledPlayer
 from app.presentation.gui.report_dialog import ReportDialog
 from app.presentation.gui.setup_dialog import SetupDialog
 from app.presentation.gui.texts import MEDIA_FILTER, language_name, stage_label
 from app.presentation.gui.versions_dialog import VersionsDialog
 from app.presentation.gui.video_style_dialog import VideoStyleDialog
+from app.presentation.gui.whats_new_dialog import WhatsNewDialog, bundled_notes
 from app.presentation.gui.widgets import NoticeBox, UpdateBanner, card, icon_button, section_label
 
 WINDOW_SIZE = (1400, 900)
@@ -68,6 +77,7 @@ PROGRESS_STEPS = 1000
 DEFAULT_SHIFT_SECONDS = 0.25
 JOB_DONE_SIGNALS = ("succeeded", "failed", "cancelled")
 INSTALLER_HANDOFF_MS = 800
+WHATS_NEW_DELAY_MS = 600
 
 
 def show_in_folder(path: Path) -> None:
@@ -91,10 +101,12 @@ class MainWindow(QMainWindow):
         store: SettingsStore | None = None,
         log_file: Path | None = None,
         session_store: SessionStore | None = None,
+        corrections: CorrectionStore | None = None,
     ) -> None:
         super().__init__()
         self._store = store or SettingsStore()
         self._session_store = session_store or SessionStore()
+        self._corrections = corrections or CorrectionStore()
         self._first_run = not self._store.path.exists()
         self._settings = self._store.load()
         self._log_file = log_file
@@ -104,10 +116,12 @@ class MainWindow(QMainWindow):
         self._queue_active = False
         self._shared: SharedModels | None = None
         self._queue_total = 0
+        self._export_total = 0
         self._release: Release | None = None
         self._updating = False
         self._runner = BackgroundRunner(self)
         self._update_runner = BackgroundRunner(self)
+        self._notifier = DoneNotifier(self)
         self._model = CueTableModel()
         self._player = SubtitledPlayer()
         self._banner = UpdateBanner()
@@ -115,13 +129,16 @@ class MainWindow(QMainWindow):
         self._add_files_button = icon_button("Add files", "plus")
         self._add_folder_button = icon_button("Add folder", "folder")
         self._process_all_button = icon_button("Process all", "queue")
+        self._export_all_button = icon_button("Export all videos", "video")
         self._settings_button = icon_button("Settings", "settings", "ghost")
         self._report_button = icon_button("Report a problem", "report", "ghost")
         self._source = QComboBox()
         self._target = QComboBox()
         self._context = QLineEdit()
         self._names = QLineEdit()
+        self._fixes_button = icon_button("Remembered fixes", "check", "ghost")
         self._version = QLabel(f"Version {installed_version()}")
+        self._whats_new_button = QPushButton("What's new")
         self._start_button = icon_button("Generate subtitles", "sparkles", "primary")
         self._cancel_button = icon_button("Cancel", "stop", "danger")
         self._progress = QProgressBar()
@@ -195,12 +212,15 @@ class MainWindow(QMainWindow):
         footer = QHBoxLayout()
         footer.addStretch(1)
         footer.addWidget(self._version)
+        footer.addWidget(self._whats_new_button)
         layout.addLayout(footer)
         self.setCentralWidget(root)
         self._update_buttons()
         if self._first_run:
             QTimer.singleShot(0, self._open_settings)
-        elif self._settings.check_for_updates:
+            return
+        QTimer.singleShot(WHATS_NEW_DELAY_MS, self._show_unseen_notes)
+        if self._settings.check_for_updates:
             QTimer.singleShot(1500, self._check_for_updates)
 
     def _configure_widgets(self) -> None:
@@ -217,6 +237,9 @@ class MainWindow(QMainWindow):
         self._stage.setObjectName("muted")
         self._version.setObjectName("muted")
         self._version.setToolTip("The ClipTranslator version installed on this computer.")
+        self._whats_new_button.setObjectName("link")
+        self._whats_new_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._whats_new_button.setToolTip("See what changed in each version")
         self._stage.setWordWrap(True)
         self._summary.setObjectName("muted")
         self._cancel_button.hide()
@@ -240,6 +263,13 @@ class MainWindow(QMainWindow):
             self._add_files_button: "Add one or more videos",
             self._add_folder_button: "Add every video in a folder",
             self._process_all_button: "Generate and export subtitles for every pending clip",
+            self._export_all_button: (
+                "Create the videos of every processed clip at once, with the same style"
+            ),
+            self._fixes_button: (
+                "Words and phrases you fixed in your subtitles. They are fixed the same "
+                "way in your next clips."
+            ),
         }
         for widget, tip in tips.items():
             widget.setToolTip(tip)
@@ -288,6 +318,7 @@ class MainWindow(QMainWindow):
         options.addRow("To", self._target)
         options.addRow("Context", self._context)
         options.addRow("Names", self._names)
+        options.addRow("", self._fixes_button)
         buttons = QHBoxLayout()
         buttons.addWidget(self._start_button, stretch=1)
         buttons.addWidget(self._cancel_button, stretch=1)
@@ -301,7 +332,13 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
         layout.addWidget(
-            card(section_label("Clips"), clip_buttons, self._clips, self._process_all_button),
+            card(
+                section_label("Clips"),
+                clip_buttons,
+                self._clips,
+                self._process_all_button,
+                self._export_all_button,
+            ),
             stretch=1,
         )
         layout.addWidget(card(section_label("Languages"), options))
@@ -360,8 +397,10 @@ class MainWindow(QMainWindow):
         self._add_files_button.clicked.connect(self._choose_files)
         self._add_folder_button.clicked.connect(self._choose_folder)
         self._process_all_button.clicked.connect(self._process_all)
+        self._export_all_button.clicked.connect(self._export_all_videos)
         self._settings_button.clicked.connect(self._open_settings)
         self._report_button.clicked.connect(self._report_problem)
+        self._whats_new_button.clicked.connect(self._show_all_notes)
         self._start_button.clicked.connect(self._start)
         self._cancel_button.clicked.connect(self._cancel)
         self._export_button.clicked.connect(self._export)
@@ -378,6 +417,8 @@ class MainWindow(QMainWindow):
         self._table.clicked.connect(self._seek_to_row)
         self._model.edited.connect(self._on_cues_edited)
         self._model.edit_rejected.connect(self._stage.setText)
+        self._model.text_corrected.connect(self._remember_fix)
+        self._fixes_button.clicked.connect(self._open_fixes)
         self._model.undo_stack.cleanChanged.connect(lambda *_: self._update_buttons())
         self._model.undo_stack.indexChanged.connect(lambda *_: self._update_buttons())
         self._table.selectionModel().selectionChanged.connect(lambda *_: self._update_buttons())
@@ -499,6 +540,9 @@ class MainWindow(QMainWindow):
         failed = len(self._clips.with_status(ClipStatus.FAILED))
         self._set_progress(1.0, f"Queue finished: {exported} exported, {failed} failed.")
         self._update_buttons()
+        self._notifier.notify(
+            "All clips are ready", f"{exported} exported, {failed} failed. Check them and export."
+        )
 
     def _with_queue_prefix(self, message: str) -> str:
         if not self._queue_active:
@@ -513,7 +557,7 @@ class MainWindow(QMainWindow):
 
     def _cancel(self) -> None:
         job = self._runner.job
-        if isinstance(job, SubtitleJob | PrepareJob):
+        if isinstance(job, SubtitleJob | PrepareJob | ExportAllVideosJob):
             job.cancel()
             self._queue_active = False
             self._cancel_button.setEnabled(False)
@@ -539,6 +583,7 @@ class MainWindow(QMainWindow):
             self._export(quiet=True)
         else:
             self._set_progress(1.0, "Done. Click a line to preview it, edit it, then export.")
+            self._notifier.notify("Subtitles ready", pipeline.state.media.name)
 
     def _on_cancelled(self) -> None:
         if self._media is not None:
@@ -574,6 +619,31 @@ class MainWindow(QMainWindow):
             self._clips.set_status(self._pipeline.state.media, ClipStatus.READY)
         self._stage.setText("Edits saved automatically.")
         self._update_buttons()
+
+    def _remember_fix(self, column: int, before: str, after: str) -> None:
+        if self._pipeline is None:
+            return
+        state = self._pipeline.state
+        target = self._settings.translation.target_language
+        language = (state.language or "und") if column == Column.ORIGINAL else target
+        correction = learn(before, after, language)
+        if correction is None:
+            return
+        try:
+            self._corrections.remember(correction)
+        except OSError as error:
+            self._stage.setText(f"Could not remember that fix: {error}")
+            return
+        self._pipeline.corrections = self._corrections.load()
+        self._notices.add(
+            f"Remembered: “{correction.wrong}” → “{correction.right}”. Your next clips will "
+            "use it. Change this in Remembered fixes."
+        )
+
+    def _open_fixes(self) -> None:
+        CorrectionsDialog(self._corrections, self).exec()
+        if self._pipeline is not None:
+            self._pipeline.corrections = self._corrections.load()
 
     def _shift_selected(self, direction: int) -> None:
         if self._pipeline is None or self._runner.busy:
@@ -652,15 +722,12 @@ class MainWindow(QMainWindow):
         if not quiet:
             self._show_saved("Subtitles saved", self._files)
 
-    def _export_video(self) -> None:
-        if self._pipeline is None or self._runner.busy:
-            return
-        sample = self._preview_cue()
-        seconds = (sample.start + sample.end) / 2 if sample else self._player.position()
-        text = format_for_screen(sample.translation, self._pipeline.cue_rules) if sample else ""
+    def _ask_video_options(
+        self, media: Path, seconds: float, text: str, title: str = ""
+    ) -> VideoOptions | None:
         video = self._settings.video
         dialog = VideoStyleDialog(
-            self._pipeline.state.media,
+            media,
             seconds,
             text,
             video.style(),
@@ -669,12 +736,14 @@ class MainWindow(QMainWindow):
             video.remove_music,
             video.level_audio,
             video.leveling(),
-            self._pipeline.state.work_dir / "vocals_44k.wav",
+            work_dir_for(media, self._settings) / "vocals_44k.wav",
             video.translate_prompts,
             video.prompts(),
         )
+        if title:
+            dialog.setWindowTitle(title)
         if not dialog.exec():
-            return
+            return None
         style = dialog.style()
         video.remember(style)
         video.burn_subtitles = dialog.burn_subtitles()
@@ -684,13 +753,23 @@ class MainWindow(QMainWindow):
         video.translate_prompts = dialog.translate_prompts()
         video.prompt_style = dialog.prompt_style().value
         self._store.save(self._settings)
-        job = ExportVideoJob(
-            self._pipeline,
+        return VideoOptions(
             style if video.burn_subtitles else None,
             video.remove_music,
             video.leveling() if video.level_audio else None,
             video.prompts() if video.translate_prompts else None,
         )
+
+    def _export_video(self) -> None:
+        if self._pipeline is None or self._runner.busy:
+            return
+        sample = self._preview_cue()
+        seconds = (sample.start + sample.end) / 2 if sample else self._player.position()
+        text = format_for_screen(sample.translation, self._pipeline.cue_rules) if sample else ""
+        options = self._ask_video_options(self._pipeline.state.media, seconds, text)
+        if options is None:
+            return
+        job = ExportVideoJob(self._pipeline, options)
         job.progressed.connect(
             lambda fraction: self._set_progress(fraction, f"Creating the video… {fraction:.0%}")
         )
@@ -699,6 +778,54 @@ class MainWindow(QMainWindow):
         self._set_progress(0.0, "Creating the video…")
         self._runner.start(job, ("succeeded", "failed"))
         self._update_buttons()
+
+    def _videos_to_export(self) -> list[Path]:
+        done = self._clips.with_status(ClipStatus.READY, ClipStatus.EXPORTED)
+        return [path for path in done if has_video(path)]
+
+    def _export_all_videos(self) -> None:
+        clips = self._videos_to_export()
+        if not clips or self._runner.busy or self._updating:
+            return
+        sample = self._preview_cue() if self._pipeline is not None else None
+        first = self._pipeline.state.media if sample is not None else clips[0]
+        seconds = (sample.start + sample.end) / 2 if sample else 0.0
+        text = (
+            format_for_screen(sample.translation, self._pipeline.cue_rules)
+            if sample is not None and self._pipeline is not None
+            else ""
+        )
+        options = self._ask_video_options(first, seconds, text, f"Export {len(clips)} videos")
+        if options is None:
+            return
+        self._remember_choices()
+        self._shared = SharedModels(self._settings)
+        self._export_total = len(clips)
+        job = ExportAllVideosJob(
+            [self._request_for(path) for path in clips], self._settings, options, self._shared
+        )
+        job.progressed.connect(lambda overall, message: self._set_progress(overall, f"{message}…"))
+        job.clip_exported.connect(
+            lambda path, _output: self._clips.set_status(path, ClipStatus.EXPORTED)
+        )
+        job.clip_failed.connect(self._on_prepare_failed)
+        job.succeeded.connect(self._on_all_videos_exported)
+        job.cancelled.connect(lambda: self._set_progress(0.0, "Cancelled."))
+        self._set_progress(0.0, f"Creating {len(clips)} videos…")
+        self._runner.start(job, ("succeeded", "cancelled"))
+        self._update_buttons()
+
+    def _on_all_videos_exported(self, outputs: list[Path]) -> None:
+        self._shared = None
+        failed = self._export_total - len(outputs)
+        message = f"{len(outputs)} videos saved."
+        if failed > 0:
+            message += f" {failed} failed: see the notes on the left."
+        self._set_progress(1.0, message)
+        self._notifier.notify("Videos saved", message)
+        if outputs:
+            self._files = outputs
+            self._show_saved("Videos saved", outputs)
 
     def _preview_cue(self) -> Cue | None:
         rows = self._selected_rows()
@@ -713,6 +840,7 @@ class MainWindow(QMainWindow):
         if self._pipeline is not None:
             self._clips.set_status(self._pipeline.state.media, ClipStatus.EXPORTED)
         self._set_progress(1.0, f"Video saved: {output.name}")
+        self._notifier.notify("Video saved", output.name)
         self._show_saved("Video saved", [output])
 
     def _show_saved(self, title: str, files: list[Path]) -> None:
@@ -728,6 +856,7 @@ class MainWindow(QMainWindow):
 
     def _show_error(self, message: str) -> None:
         self._set_progress(0.0, "Something went wrong.")
+        self._notifier.notify("Something went wrong", message)
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Critical)
         box.setWindowTitle("Something went wrong")
@@ -878,10 +1007,31 @@ class MainWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
         self._show_saved("Report saved", [target])
 
+    def _show_unseen_notes(self) -> None:
+        current = installed_version()
+        notes = unseen_notes(bundled_notes(), self._settings.last_seen_version, current)
+        self._mark_notes_seen()
+        if notes:
+            WhatsNewDialog(notes, f"What's new in ClipTranslator {current}", self).exec()
+
+    def _show_all_notes(self) -> None:
+        WhatsNewDialog(bundled_notes(), "What's new in ClipTranslator", self).exec()
+
+    def _mark_notes_seen(self) -> None:
+        current = installed_version()
+        if self._settings.last_seen_version == current or not self._store.path.exists():
+            return
+        self._settings.last_seen_version = current
+        try:
+            self._store.save(self._settings)
+        except OSError as error:
+            self._stage.setText(f"Could not save your settings: {error}")
+
     def _open_settings(self) -> None:
         if SetupDialog(self._store, self).exec():
             self._settings = self._store.load()
             self._fill_targets()
+            self._mark_notes_seen()
         if self._first_run and self._settings.check_for_updates:
             self._first_run = False
             self._check_for_updates()
@@ -901,7 +1051,9 @@ class MainWindow(QMainWindow):
 
     def _update_buttons(self) -> None:
         running = self._runner.busy
-        processing = running and isinstance(self._runner.job, SubtitleJob | PrepareJob)
+        processing = running and isinstance(
+            self._runner.job, SubtitleJob | PrepareJob | ExportAllVideosJob
+        )
         has_result = self._pipeline is not None
         editable = has_result and not running
         stack = self._model.undo_stack
@@ -922,6 +1074,7 @@ class MainWindow(QMainWindow):
         self._process_all_button.setEnabled(
             not running and bool(self._clips.with_status(ClipStatus.PENDING))
         )
+        self._export_all_button.setEnabled(not running and bool(self._videos_to_export()))
         self._clips.setEnabled(not running)
         self._undo_button.setEnabled(editable and stack.canUndo())
         self._redo_button.setEnabled(editable and stack.canRedo())
@@ -943,6 +1096,7 @@ class MainWindow(QMainWindow):
             for widget in (
                 self._start_button,
                 self._process_all_button,
+                self._export_all_button,
                 self._export_video_button,
                 self._settings_button,
             ):

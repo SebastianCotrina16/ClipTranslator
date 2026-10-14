@@ -33,6 +33,7 @@ from app.application.translation import (
 )
 from app.config.prompts import MERGED_REVIEW_ADDENDUM, REVIEW_PROMPT, screen_prompts_prompt_for
 from app.config.settings import Settings, SubtitleSettings, redacted
+from app.domain.corrections import Correction, apply_to_cues, apply_to_text, for_language
 from app.domain.languages import english_name
 from app.domain.models import (
     Cue,
@@ -189,6 +190,7 @@ class Pipeline:
         self._transcriber: Transcriber | None = None
         self._language_model: LanguageModel | None = None
         self.keep_language_model = False
+        self.corrections: list[Correction] = []
 
     @property
     def cue_rules(self) -> CueRules:
@@ -368,7 +370,11 @@ class Pipeline:
             )
         finally:
             model.unload()
-        return data["translations"]
+        remembered = for_language(self.corrections, translation.target_language)
+        return {
+            source: apply_to_text(text, remembered) if remembered else text
+            for source, text in data["translations"].items()
+        }
 
     def detect_language(self) -> LanguageDetection:
         speech_audio = self._speech_audio()
@@ -622,10 +628,18 @@ class Pipeline:
             Stage.CUES, asdict(rules), compute, upstream=self.state.keys[Stage.TRANSLATION]
         )
         self.state.cues = cues_from_records(raw)
+        fixed = apply_to_cues(
+            self.state.cues,
+            self.corrections,
+            self.state.language or "und",
+            self.settings.translation.target_language,
+        )
         edited = self.edits.load(self.state.keys[Stage.CUES])
         if edited is not None and len(edited) == len(self.state.cues):
             self.state.cues = edited
             self.state.restored_edits = True
+        elif fixed:
+            self._warn(f"Your remembered corrections fixed {fixed} line(s).")
         self._append_run_log()
         return self.state.cues
 

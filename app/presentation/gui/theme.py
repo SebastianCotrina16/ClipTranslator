@@ -131,6 +131,10 @@ def stylesheet(assets: Path, p: Palette = PALETTE) -> str:
     QPushButton#danger {{ color: {p.danger}; border-color: rgba(255, 122, 156, 0.4); }}
     QPushButton#ghost {{ background: transparent; border: 1px solid transparent; }}
     QPushButton#ghost:hover {{ background: {p.surface_hover}; }}
+    QPushButton#link {{
+        background: transparent; border: 0; padding: 0 4px; color: {p.border_focus};
+    }}
+    QPushButton#link:hover {{ text-decoration: underline; }}
     QPushButton#help {{
         min-width: 20px; max-width: 20px; min-height: 20px; max-height: 20px;
         padding: 0; border-radius: 10px; font-weight: 700; color: {p.text_muted};

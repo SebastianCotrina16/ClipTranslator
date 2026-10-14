@@ -135,6 +135,7 @@ class Settings:
     video: VideoSettings = field(default_factory=VideoSettings)
     work_dir: str = ""
     check_for_updates: bool = True
+    last_seen_version: str = ""
 
     def work_root(self, default: Path) -> Path:
         return Path(self.work_dir) if self.work_dir else default

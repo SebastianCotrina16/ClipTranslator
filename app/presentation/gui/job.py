@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -48,6 +49,65 @@ class JobRequest:
     media: Path
     source_language: str | None
     clip_context: str
+
+
+@dataclass(frozen=True)
+class VideoOptions:
+    style: SubtitleStyle | None
+    remove_music: bool = False
+    leveling: Leveling | None = None
+    prompts: PromptStyle | None = None
+
+
+def export_shares(options: VideoOptions) -> dict[str, tuple[float, float]]:
+    weights = {
+        "prompts": PROMPT_SCAN_WEIGHT if options.prompts is not None else 0.0,
+        "music": MUSIC_REMOVAL_WEIGHT if options.remove_music else 0.0,
+        "video": 1.0,
+    }
+    total = sum(weights.values())
+    shares, start = {}, 0.0
+    for step, weight in weights.items():
+        shares[step] = (start / total, weight / total)
+        start += weight
+    return shares
+
+
+def render_clip_video(
+    pipeline: Pipeline, options: VideoOptions, progress: Callable[[float], None]
+) -> Path:
+    media = pipeline.state.media
+    subtitled, leveled = options.style is not None, options.leveling is not None
+    prompts = options.prompts is not None
+    output = media.with_name(video_name(media, subtitled, options.remove_music, leveled, prompts))
+    subtitles = pipeline.export(extras=False)[0] if subtitled else None
+    shares = export_shares(options)
+
+    def reporter(step: str) -> Callable[[float], None]:
+        start, share = shares[step]
+        return lambda fraction: progress(start + share * fraction)
+
+    frame_filter = None
+    if options.prompts is not None:
+        scan = pipeline.read_screen_prompts(reporter("prompts"))
+        translations = pipeline.translate_screen_prompts(scan)
+        renderer = PromptRenderer(
+            scan.detections, scan.templates, translations, scan.fps, options.prompts
+        )
+        frame_filter = renderer.apply if renderer.active else None
+    audio = pipeline.voice_audio(reporter("music")) if options.remove_music else None
+    render_video(
+        media,
+        output,
+        subtitles,
+        options.style,
+        audio,
+        pipeline.state.duration,
+        reporter("video"),
+        options.leveling,
+        frame_filter,
+    )
+    return output
 
 
 def overall_progress(stage: str, fraction: float) -> float:
@@ -235,75 +295,96 @@ class ExportVideoJob(QObject):
     succeeded = Signal(object)
     failed = Signal(str)
 
-    def __init__(
-        self,
-        pipeline: Pipeline,
-        style: SubtitleStyle | None,
-        remove_music: bool = False,
-        leveling: Leveling | None = None,
-        prompts: PromptStyle | None = None,
-    ) -> None:
+    def __init__(self, pipeline: Pipeline, options: VideoOptions) -> None:
         super().__init__()
         self._pipeline = pipeline
-        self._style = style
-        self._remove_music = remove_music
-        self._leveling = leveling
-        self._prompts = prompts
+        self._options = options
 
     @Slot()
     def run(self) -> None:
         try:
-            media = self._pipeline.state.media
-            subtitled, leveled = self._style is not None, self._leveling is not None
-            prompts = self._prompts is not None
-            name = video_name(media, subtitled, self._remove_music, leveled, prompts)
-            output = media.with_name(name)
-            subtitles = self._pipeline.export(extras=False)[0] if subtitled else None
-            shares = self._shares()
-            frame_filter = None
-            if self._prompts is not None:
-                scan = self._pipeline.read_screen_prompts(self._reporter(shares, "prompts"))
-                translations = self._pipeline.translate_screen_prompts(scan)
-                renderer = PromptRenderer(
-                    scan.detections, scan.templates, translations, scan.fps, self._prompts
-                )
-                frame_filter = renderer.apply if renderer.active else None
-            audio = None
-            if self._remove_music:
-                audio = self._pipeline.voice_audio(self._reporter(shares, "music"))
-            render_video(
-                media,
-                output,
-                subtitles,
-                self._style,
-                audio,
-                self._pipeline.state.duration,
-                self._reporter(shares, "video"),
-                self._leveling,
-                frame_filter,
-            )
+            output = render_clip_video(self._pipeline, self._options, self.progressed.emit)
         except Exception as error:
             log.exception("Exporting the video failed")
             self.failed.emit(str(error))
             return
         self.succeeded.emit(output)
 
-    def _shares(self) -> dict[str, tuple[float, float]]:
-        weights = {
-            "prompts": PROMPT_SCAN_WEIGHT if self._prompts is not None else 0.0,
-            "music": MUSIC_REMOVAL_WEIGHT if self._remove_music else 0.0,
-            "video": 1.0,
-        }
-        total = sum(weights.values())
-        shares, start = {}, 0.0
-        for step, weight in weights.items():
-            shares[step] = (start / total, weight / total)
-            start += weight
-        return shares
 
-    def _reporter(self, shares: dict[str, tuple[float, float]], step: str):
-        start, share = shares[step]
-        return lambda fraction: self.progressed.emit(start + share * fraction)
+class ExportAllVideosJob(QObject):
+    progressed = Signal(float, str)
+    clip_exported = Signal(object, object)
+    clip_failed = Signal(object, str)
+    succeeded = Signal(object)
+    cancelled = Signal()
+
+    def __init__(
+        self,
+        requests: list[JobRequest],
+        settings: Settings,
+        options: VideoOptions,
+        shared: SharedModels,
+    ) -> None:
+        super().__init__()
+        self._requests = requests
+        self._settings = settings
+        self._options = options
+        self._shared = shared
+        self._cancel = threading.Event()
+        self._number = 0
+
+    def cancel(self) -> None:
+        self._cancel.set()
+
+    @Slot()
+    def run(self) -> None:
+        outputs: list[Path] = []
+        try:
+            for number, request in enumerate(self._requests):
+                self._number = number
+                if self._cancel.is_set():
+                    raise JobCancelledError
+                self._report(0.0)
+                try:
+                    output = self._export(request)
+                except JobCancelledError:
+                    raise
+                except Exception as error:
+                    log.exception("Exporting the video of %s failed", request.media)
+                    self.clip_failed.emit(request.media, str(error))
+                    continue
+                outputs.append(output)
+                self.clip_exported.emit(request.media, output)
+        except JobCancelledError:
+            self._shared.release()
+            self.cancelled.emit()
+            return
+        self._shared.release()
+        self.succeeded.emit(outputs)
+
+    def _export(self, request: JobRequest) -> Path:
+        pipeline = create_pipeline(
+            request.media, self._settings, self._stop_if_cancelled, shared=self._shared
+        )
+        pipeline.isolate_speech()
+        if request.source_language:
+            pipeline.set_language(request.source_language)
+        else:
+            pipeline.detect_language()
+        pipeline.transcribe()
+        pipeline.translate(request.clip_context)
+        pipeline.build_cues()
+        return render_clip_video(pipeline, self._options, self._report)
+
+    def _stop_if_cancelled(self, *_: object) -> None:
+        if self._cancel.is_set():
+            raise JobCancelledError
+
+    def _report(self, fraction: float) -> None:
+        total = max(len(self._requests), 1)
+        overall = (self._number + min(max(fraction, 0.0), 1.0)) / total
+        media = self._requests[self._number].media
+        self.progressed.emit(overall, f"Video {self._number + 1} of {total} · {media.name}")
 
 
 class UpdateDownloadJob(QObject):
