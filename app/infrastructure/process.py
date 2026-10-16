@@ -19,7 +19,7 @@ def run_hidden(command: list[str], **options: Any) -> subprocess.CompletedProces
     return subprocess.run(command, creationflags=flags, **options)
 
 
-def start_in_background(command: list[str]) -> None:
+def start_in_background(command: list[str]) -> subprocess.Popen:
     streams: dict[str, Any] = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
@@ -27,13 +27,30 @@ def start_in_background(command: list[str]) -> None:
         "close_fds": True,
     }
     if sys.platform != "win32":
-        subprocess.Popen(command, start_new_session=True, **streams)
-        return
+        return subprocess.Popen(command, start_new_session=True, **streams)
     flags = WINDOWS_DETACHED | WINDOWS_NORMAL_PRIORITY
     try:
-        subprocess.Popen(command, creationflags=flags | WINDOWS_BREAKAWAY_FROM_JOB, **streams)
+        return subprocess.Popen(
+            command, creationflags=flags | WINDOWS_BREAKAWAY_FROM_JOB, **streams
+        )
     except OSError:
-        subprocess.Popen(command, creationflags=flags, **streams)
+        return subprocess.Popen(command, creationflags=flags, **streams)
+
+
+def stop_process_tree(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+    if sys.platform == "win32":
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            run_hidden(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True,
+                check=False,
+                timeout=15,
+            )
+        return
+    with contextlib.suppress(OSError):
+        process.terminate()
 
 
 def lower_current_process_priority() -> None:

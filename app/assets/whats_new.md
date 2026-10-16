@@ -1,3 +1,7 @@
+## 1.7.1
+
+- **Ollama closes with the app:** if ClipTranslator opened Ollama, it closes it again when you close ClipTranslator. If you opened Ollama yourself, it is left alone.
+
 ## 1.7.0
 
 - **Ollama starts by itself:** if Ollama is closed, ClipTranslator opens it in the background when it needs to translate. No window, nothing to do.

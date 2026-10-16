@@ -43,6 +43,7 @@ from app.domain.subtitles import format_for_screen
 from app.infrastructure.diagnostics import create_report, report_name
 from app.infrastructure.ffmpeg import has_video
 from app.infrastructure.github_releases import installed_version
+from app.infrastructure.llm.ollama import stop_launched_servers
 from app.infrastructure.self_update import can_update_itself, launch_installer
 from app.presentation.gui.background import BackgroundRunner
 from app.presentation.gui.clip_queue import ClipList, ClipStatus
@@ -189,6 +190,7 @@ class MainWindow(QMainWindow):
         job = self._runner.job
         if isinstance(job, SubtitleJob):
             job.cancel()
+        stop_launched_servers()
         super().closeEvent(event)
 
     def _build(self) -> None:

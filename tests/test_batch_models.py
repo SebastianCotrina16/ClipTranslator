@@ -83,7 +83,9 @@ def test_a_closed_local_ollama_is_started_in_the_background(monkeypatch) -> None
     answers = iter([False, False, True])
     monkeypatch.setattr(OllamaModel, "is_running", lambda self: next(answers))
     monkeypatch.setattr(ollama, "ollama_executable", lambda: "ollama.exe")
-    monkeypatch.setattr(ollama, "start_in_background", started.append)
+    monkeypatch.setattr(
+        ollama, "launch_server", lambda executable: started.append([executable, "serve"])
+    )
     monkeypatch.setattr(ollama.time, "sleep", lambda seconds: None)
     assert OllamaModel("qwen3.5:9b").start_if_needed()
     assert started == [["ollama.exe", "serve"]]
@@ -93,6 +95,29 @@ def test_a_remote_ollama_is_never_started(monkeypatch) -> None:
     started: list[list[str]] = []
     monkeypatch.setattr(OllamaModel, "is_running", lambda self: False)
     monkeypatch.setattr(ollama, "ollama_executable", lambda: "ollama.exe")
-    monkeypatch.setattr(ollama, "start_in_background", started.append)
+    monkeypatch.setattr(
+        ollama, "launch_server", lambda executable: started.append([executable, "serve"])
+    )
     assert not OllamaModel("qwen3.5:9b", "http://192.168.1.20:11434").start_if_needed()
     assert started == []
+
+
+class FakeServer:
+    def __init__(self, running: bool) -> None:
+        self.running = running
+
+    def poll(self) -> int | None:
+        return None if self.running else 0
+
+
+def test_only_the_ollama_the_app_started_and_still_runs_is_stopped(monkeypatch) -> None:
+    stopped: list[FakeServer] = []
+    servers = [FakeServer(True), FakeServer(False)]
+    launches = iter(servers)
+    monkeypatch.setattr(ollama, "start_in_background", lambda command: next(launches))
+    monkeypatch.setattr(ollama, "stop_process_tree", stopped.append)
+    ollama.launch_server("ollama.exe")
+    ollama.launch_server("ollama.exe")
+    assert ollama.stop_launched_servers() == 1
+    assert stopped == [servers[0]]
+    assert ollama.stop_launched_servers() == 0

@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import subprocess
 import time
 from collections.abc import Callable
 from typing import Any
@@ -14,7 +15,7 @@ from app.application.ports import LanguageModelError
 from app.application.setup_advisor import translation_model_size
 from app.infrastructure.gpu import free_vram_mb
 from app.infrastructure.llm.http import parse_json_object, post_json, validated_base_url
-from app.infrastructure.process import start_in_background
+from app.infrastructure.process import start_in_background, stop_process_tree
 from app.infrastructure.system_probe import ollama_executable
 
 log = logging.getLogger(__name__)
@@ -48,6 +49,23 @@ def context_size_for(system: str, user: str) -> int:
     while size < needed and size < MAX_CONTEXT:
         size *= 2
     return size
+
+
+_launched: list[subprocess.Popen] = []
+
+
+def launch_server(executable: str) -> None:
+    _launched.append(start_in_background([executable, "serve"]))
+
+
+def stop_launched_servers() -> int:
+    stopped = 0
+    while _launched:
+        process = _launched.pop()
+        if process.poll() is None:
+            stop_process_tree(process)
+            stopped += 1
+    return stopped
 
 
 class OllamaModel:
@@ -105,7 +123,7 @@ class OllamaModel:
             return False
         log.info("Ollama is not running; starting it in the background.")
         try:
-            start_in_background([executable, "serve"])
+            launch_server(executable)
         except OSError as error:
             log.warning("Could not start Ollama: %s", error)
             return False
