@@ -11,7 +11,7 @@ from pathlib import Path
 from app.config.store import models_dir, whisper_models_dir
 from app.infrastructure.ffmpeg import FfmpegAudio
 from app.infrastructure.llm.ollama import OllamaModel
-from app.infrastructure.process import run_hidden, start_hidden
+from app.infrastructure.process import run_hidden, start_in_background
 from app.infrastructure.separation.mdx import download_model, model_file
 from app.infrastructure.system_probe import ollama_executable, ollama_models
 from app.infrastructure.whisper import (
@@ -88,7 +88,7 @@ def start_ollama(url: str) -> None:
     executable = ollama_executable()
     if executable is None:
         raise SetupError("Ollama is not installed.")
-    start_hidden([executable, "serve"])
+    start_in_background([executable, "serve"])
     for _ in range(OLLAMA_START_SECONDS):
         time.sleep(1)
         if ollama_models(url) is not None:

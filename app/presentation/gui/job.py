@@ -9,6 +9,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Signal, Slot
 
 from app.application.pipeline import Pipeline, Stage
+from app.application.ports import LanguageModelError
 from app.application.updates import Installer, newer_release
 from app.bootstrap import SharedModels, create_pipeline
 from app.config.settings import Settings
@@ -125,6 +126,7 @@ class SubtitleJob(QObject):
     succeeded = Signal(object)
     cancelled = Signal()
     failed = Signal(str)
+    model_unavailable = Signal(str)
 
     def __init__(
         self, request: JobRequest, settings: Settings, shared: SharedModels | None = None
@@ -150,6 +152,10 @@ class SubtitleJob(QObject):
             self._process(pipeline)
         except JobCancelledError:
             self.cancelled.emit()
+            return
+        except LanguageModelError as error:
+            log.exception("The translation model failed for %s", self._request.media)
+            self.model_unavailable.emit(str(error))
             return
         except Exception as error:
             log.exception("Subtitle job failed for %s", self._request.media)

@@ -75,7 +75,7 @@ WINDOW_SIZE = (1400, 900)
 SIDEBAR_WIDTH = 370
 PROGRESS_STEPS = 1000
 DEFAULT_SHIFT_SECONDS = 0.25
-JOB_DONE_SIGNALS = ("succeeded", "failed", "cancelled")
+JOB_DONE_SIGNALS = ("succeeded", "failed", "cancelled", "model_unavailable")
 INSTALLER_HANDOFF_MS = 800
 WHATS_NEW_DELAY_MS = 600
 
@@ -487,6 +487,7 @@ class MainWindow(QMainWindow):
         job.succeeded.connect(self._on_success)
         job.cancelled.connect(self._on_cancelled)
         job.failed.connect(self._on_failure)
+        job.model_unavailable.connect(self._on_model_unavailable)
         self._clips.set_status(self._media, ClipStatus.PROCESSING)
         self._set_progress(0.0, self._with_queue_prefix("Starting…"))
         self._runner.start(job, JOB_DONE_SIGNALS)
@@ -596,6 +597,17 @@ class MainWindow(QMainWindow):
         if self._queue_active and self._media is not None:
             self._notices.add(f"{self._media.name}: {message}")
             return
+        self._show_error(message)
+
+    def _on_model_unavailable(self, message: str) -> None:
+        if self._media is not None:
+            self._clips.set_status(self._media, ClipStatus.PENDING)
+        if self._queue_active:
+            self._queue_active = False
+            message += (
+                "\n\nThe other clips were not translated. What was already transcribed is "
+                "saved: click Process all to continue."
+            )
         self._show_error(message)
 
     def _on_job_finished(self) -> None:

@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
+import time
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -11,8 +14,15 @@ from app.application.ports import LanguageModelError
 from app.application.setup_advisor import translation_model_size
 from app.infrastructure.gpu import free_vram_mb
 from app.infrastructure.llm.http import parse_json_object, post_json, validated_base_url
+from app.infrastructure.process import start_in_background
+from app.infrastructure.system_probe import ollama_executable
+
+log = logging.getLogger(__name__)
 
 OLLAMA_DOWNLOAD_URL = "https://ollama.com/download"
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+STARTUP_SECONDS = 30.0
+STARTUP_POLL_SECONDS = 0.5
 VRAM_HEADROOM = 1.1
 MIN_CONTEXT = 4096
 MAX_CONTEXT = 65536
@@ -84,8 +94,30 @@ class OllamaModel:
         names = {entry.get("name") for entry in response.json().get("models", [])}
         return self.model in names or f"{self.model}:latest" in names
 
+    def is_local(self) -> bool:
+        return urlparse(self.url).hostname in LOCAL_HOSTS
+
+    def start_if_needed(self) -> bool:
+        if self.is_running():
+            return True
+        executable = ollama_executable() if self.is_local() else None
+        if executable is None:
+            return False
+        log.info("Ollama is not running; starting it in the background.")
+        try:
+            start_in_background([executable, "serve"])
+        except OSError as error:
+            log.warning("Could not start Ollama: %s", error)
+            return False
+        deadline = time.monotonic() + STARTUP_SECONDS
+        while time.monotonic() < deadline:
+            if self.is_running():
+                return True
+            time.sleep(STARTUP_POLL_SECONDS)
+        return False
+
     def prepare(self, progress: Callable[[float, str], None] | None = None) -> list[str]:
-        if not self.is_running():
+        if not self.start_if_needed():
             raise LanguageModelError(
                 f"Ollama is not responding. Open it (or install it from {OLLAMA_DOWNLOAD_URL}) "
                 "or choose API translation in Settings."

@@ -1,3 +1,9 @@
+## 1.7.0
+
+- **Ollama starts by itself:** if Ollama is closed, ClipTranslator opens it in the background when it needs to translate. No window, nothing to do.
+- **Smart App Control:** the app now opens through the standard Python launcher, so Windows Smart App Control should no longer block it.
+- If the translation model stops working during **Process all**, the batch stops with one clear message instead of failing every clip. What was already transcribed is kept.
+
 ## 1.6.0
 
 - **Export all videos:** after Process all, click **Export all videos** to create the videos of every processed clip at once, with the same style.

@@ -76,3 +76,23 @@ def test_the_context_only_grows_and_model_times_are_counted(
     model.unload()
     model.complete("system", "short", {})
     assert sent[-1] == 4096
+
+
+def test_a_closed_local_ollama_is_started_in_the_background(monkeypatch) -> None:
+    started: list[list[str]] = []
+    answers = iter([False, False, True])
+    monkeypatch.setattr(OllamaModel, "is_running", lambda self: next(answers))
+    monkeypatch.setattr(ollama, "ollama_executable", lambda: "ollama.exe")
+    monkeypatch.setattr(ollama, "start_in_background", started.append)
+    monkeypatch.setattr(ollama.time, "sleep", lambda seconds: None)
+    assert OllamaModel("qwen3.5:9b").start_if_needed()
+    assert started == [["ollama.exe", "serve"]]
+
+
+def test_a_remote_ollama_is_never_started(monkeypatch) -> None:
+    started: list[list[str]] = []
+    monkeypatch.setattr(OllamaModel, "is_running", lambda self: False)
+    monkeypatch.setattr(ollama, "ollama_executable", lambda: "ollama.exe")
+    monkeypatch.setattr(ollama, "start_in_background", started.append)
+    assert not OllamaModel("qwen3.5:9b", "http://192.168.1.20:11434").start_if_needed()
+    assert started == []

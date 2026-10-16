@@ -1,5 +1,6 @@
 #define AppName "ClipTranslator"
-#define AppExe "{app}\.venv\Scripts\cliptranslator-app.exe"
+#define AppExe "{app}\.venv\Scripts\pythonw.exe"
+#define AppParams "-m app.presentation.gui"
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
@@ -47,12 +48,12 @@ Type: filesandordirs; Name: "{app}\python"
 Type: filesandordirs; Name: "{app}\.venv"
 
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{#AppExe}"; WorkingDir: "{app}"; IconFilename: "{app}\icon.ico"
-Name: "{autodesktop}\{#AppName}"; Filename: "{#AppExe}"; WorkingDir: "{app}"; IconFilename: "{app}\icon.ico"; Tasks: desktopicon
+Name: "{autoprograms}\{#AppName}"; Filename: "{#AppExe}"; Parameters: "{#AppParams}"; WorkingDir: "{app}"; IconFilename: "{app}\icon.ico"
+Name: "{autodesktop}\{#AppName}"; Filename: "{#AppExe}"; Parameters: "{#AppParams}"; WorkingDir: "{app}"; IconFilename: "{app}\icon.ico"; Tasks: desktopicon
 
 [Run]
-Filename: "{#AppExe}"; Description: "Open {#AppName}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
-Filename: "{#AppExe}"; WorkingDir: "{app}"; Flags: nowait; Check: ReopenAfterUpdate
+Filename: "{#AppExe}"; Parameters: "{#AppParams}"; Description: "Open {#AppName}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+Filename: "{#AppExe}"; Parameters: "{#AppParams}"; WorkingDir: "{app}"; Flags: nowait; Check: ReopenAfterUpdate
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\.venv"
