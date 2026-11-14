@@ -11,6 +11,7 @@ from app.domain.timing import (
     retime,
     shift,
 )
+from app.presentation.gui.job import StepClock
 
 
 def cue(start: float, end: float) -> Cue:
@@ -76,3 +77,13 @@ def test_newer_release_only_when_greater() -> None:
     assert newer_release("1.10.0", FixedSource(newer)) is None
     assert newer_release("1.1.0", FixedSource(None)) is None
     assert newer_release("unknown", FixedSource(newer)) is None
+
+
+def test_model_steps_show_their_percent_and_time_left() -> None:
+    now = iter([0.0, 2.0, 60.0, 61.0, 70.0])
+    clock = StepClock(lambda: next(now))
+    assert clock.detail("review", 0.0) == ""
+    assert clock.detail("review", 0.1) == "10% of this step"
+    assert clock.detail("review", 0.25) == "25% of this step · about 3 min left"
+    assert clock.detail("translate", 0.5) == "50% of this step"
+    assert clock.detail("transcribe", 0.5) == ""

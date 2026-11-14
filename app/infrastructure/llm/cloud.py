@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from app.application.ports import LanguageModelError
+from app.application.ports import LanguageModelError, TextCallback
 from app.infrastructure.llm.http import parse_json_object, post_json, validated_base_url
 
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
@@ -39,7 +39,13 @@ class AnthropicModel:
     def prepare(self, progress: Callable[[float, str], None] | None = None) -> list[str]:
         return []
 
-    def complete(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
+    def complete(
+        self,
+        system: str,
+        user: str,
+        schema: dict[str, Any],
+        on_text: TextCallback | None = None,
+    ) -> dict[str, Any]:
         payload = {
             "model": self.model,
             "max_tokens": ANTHROPIC_MAX_TOKENS,
@@ -80,7 +86,13 @@ class OpenAICompatibleModel:
     def prepare(self, progress: Callable[[float, str], None] | None = None) -> list[str]:
         return []
 
-    def complete(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
+    def complete(
+        self,
+        system: str,
+        user: str,
+        schema: dict[str, Any],
+        on_text: TextCallback | None = None,
+    ) -> dict[str, Any]:
         payload = {
             "model": self.model,
             "temperature": self.temperature,

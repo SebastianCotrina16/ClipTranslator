@@ -7,7 +7,12 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from app.application.ports import FractionCallback, LanguageModel, LanguageModelError
+from app.application.ports import (
+    FractionCallback,
+    LanguageModel,
+    LanguageModelError,
+    TextCallback,
+)
 from app.domain.languages import english_name
 from app.domain.models import Unit
 from app.domain.text import strip_control_characters
@@ -15,6 +20,7 @@ from app.domain.text import strip_control_characters
 log = logging.getLogger(__name__)
 
 MAX_SEGMENT_CHARS = 2000
+ID_FIELD = '"id"'
 
 
 class Task(StrEnum):
@@ -221,7 +227,8 @@ class TranslationService:
                 for item in items
                 if item["id"] in result
             ]
-            result.update(self._ask(pending, request, system_prompt, done or None, report))
+            counter = line_counter(progress, len(result), len(items))
+            result.update(self._ask(pending, request, system_prompt, done or None, report, counter))
             _notify(progress, len(result), len(items))
 
     def _missing_in_batches(
@@ -249,7 +256,10 @@ class TranslationService:
             batch = [{"id": uid, "text": text_by_id[uid]} for uid in batch_ids]
             for _ in range(2):
                 report.batch_requests += 1
-                result.update(self._ask(batch, request, system_prompt, surrounding, report))
+                counter = line_counter(progress, len(result), len(order))
+                result.update(
+                    self._ask(batch, request, system_prompt, surrounding, report, counter)
+                )
                 batch = [item for item in batch if item["id"] not in result]
                 if not batch:
                     break
@@ -276,11 +286,14 @@ class TranslationService:
         system_prompt: str,
         surrounding: list[dict[str, Any]] | None,
         report: TranslationReport,
+        on_text: TextCallback | None = None,
     ) -> dict[int, str]:
         report.requests += 1
         message = build_user_message(items, request, surrounding)
         try:
-            response = self._model.complete(system_prompt, message, RESPONSE_SCHEMAS[request.task])
+            response = self._model.complete(
+                system_prompt, message, RESPONSE_SCHEMAS[request.task], on_text
+            )
         except LanguageModelError as error:
             report.errors.append(str(error))
             log.warning("Model request failed: %s", error)
@@ -296,6 +309,23 @@ class TranslationService:
             report.corrections.update(validated.sources)
         report.unclear.extend(validated.unclear)
         return validated.texts
+
+
+def line_counter(progress: FractionCallback | None, done: int, total: int) -> TextCallback | None:
+    if progress is None or total <= 0:
+        return None
+    text = ""
+    reported = 0
+
+    def on_text(piece: str) -> None:
+        nonlocal text, reported
+        text += piece
+        written = max(text.count(ID_FIELD) - 1, 0)
+        if written > reported:
+            reported = written
+            progress(min(done + written, total) / total)
+
+    return on_text
 
 
 def _notify(progress: Callable[[float], None] | None, done: int, total: int) -> None:

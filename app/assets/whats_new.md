@@ -1,3 +1,8 @@
+## 1.7.2
+
+- **No more "stuck" progress bar:** while reviewing and translating, the bar now moves line by line and shows how much of the step is done and about how long is left. Long clips take a while on smaller GPUs, but now you can see it working.
+- **Cancel works right away** during reviewing and translating, instead of waiting for the whole step to finish.
+
 ## 1.7.1
 
 - **Ollama closes with the app:** if ClipTranslator opened Ollama, it closes it again when you close ClipTranslator. If you opened Ollama yourself, it is left alone.

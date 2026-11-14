@@ -38,6 +38,9 @@ class SpeechDetector(Protocol):
     def speech_only(self, audio: np.ndarray) -> np.ndarray: ...
 
 
+TextCallback = Callable[[str], None]
+
+
 class LanguageModelError(RuntimeError):
     pass
 
@@ -48,7 +51,13 @@ class LanguageModel(Protocol):
 
     def prepare(self, progress: Callable[[float, str], None] | None = None) -> list[str]: ...
 
-    def complete(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]: ...
+    def complete(
+        self,
+        system: str,
+        user: str,
+        schema: dict[str, Any],
+        on_text: TextCallback | None = None,
+    ) -> dict[str, Any]: ...
 
     def unload(self) -> None: ...
 

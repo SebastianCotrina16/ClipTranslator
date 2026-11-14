@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+import json
 
+import httpx
 import pytest
 
 from app import bootstrap
 from app.application.pipeline import PipelineServices
+from app.application.ports import LanguageModelError
 from app.config.settings import Settings
 from app.infrastructure.llm import ollama
 from app.infrastructure.llm.ollama import OllamaModel
@@ -43,23 +45,31 @@ def test_models_are_shared_during_a_batch_and_released_after(
     assert model.unloads == 1 and len(made) == 3
 
 
-def test_the_context_only_grows_and_model_times_are_counted(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def streamed(pieces: list[str], **final: float) -> httpx.Response:
+    lines = [json.dumps({"message": {"content": piece}, "done": False}) for piece in pieces]
+    lines.append(json.dumps({"message": {"content": ""}, "done": True, **final}))
+    return httpx.Response(200, content="\n".join(lines).encode())
+
+
+def test_the_context_only_grows_and_model_times_are_counted() -> None:
     sent: list[int] = []
 
-    def answer(client: Any, url: str, payload: dict[str, Any], name: str) -> dict[str, Any]:
+    def answer(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if request.url.path.endswith("/api/generate"):
+            return httpx.Response(200, json={})
+        assert payload["stream"] is True
         sent.append(payload["options"]["num_ctx"])
         load = 4e9 if len(sent) == 1 else 1e7
-        return {
-            "message": {"content": '{"translations": []}'},
-            "load_duration": load,
-            "prompt_eval_duration": 2e8,
-            "eval_duration": 1e9,
-        }
+        return streamed(
+            ['{"translations"', ": []}"],
+            load_duration=load,
+            prompt_eval_duration=2e8,
+            eval_duration=1e9,
+        )
 
-    monkeypatch.setattr(ollama, "post_json", answer)
     model = OllamaModel("qwen3.5:9b")
+    model._client = httpx.Client(transport=httpx.MockTransport(answer))
     long_text = "x" * 20_000
     model.complete("system", long_text, {})
     model.complete("system", "short", {})
@@ -121,3 +131,26 @@ def test_only_the_ollama_the_app_started_and_still_runs_is_stopped(monkeypatch) 
     assert ollama.stop_launched_servers() == 1
     assert stopped == [servers[0]]
     assert ollama.stop_launched_servers() == 0
+
+
+def test_the_answer_is_shown_while_the_model_writes_it() -> None:
+    pieces = ['{"translations": [{"id": 0, "text": "a"}, ', '{"id": 1, "text": "b"}]}']
+    seen: list[str] = []
+    model = OllamaModel("qwen3.5:9b")
+    model._client = httpx.Client(
+        transport=httpx.MockTransport(lambda request: streamed(pieces, eval_duration=1e9))
+    )
+    answer = model.complete("system", "user", {}, seen.append)
+    assert seen == pieces
+    assert [entry["id"] for entry in answer["translations"]] == [0, 1]
+
+
+def test_an_ollama_error_while_streaming_is_reported() -> None:
+    model = OllamaModel("qwen3.5:9b")
+    model._client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, content=b'{"error": "model crashed"}')
+        )
+    )
+    with pytest.raises(LanguageModelError, match="model crashed"):
+        model.complete("system", "user", {})

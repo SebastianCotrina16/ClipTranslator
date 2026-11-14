@@ -11,6 +11,7 @@ from app.application.translation import (
     Task,
     TranslationService,
     build_user_message,
+    line_counter,
     validate_response,
 )
 from app.domain.models import Unit
@@ -37,7 +38,9 @@ class ScriptedModel:
     def prepare(self, progress: Callable[[float, str], None] | None = None) -> list[str]:
         return []
 
-    def complete(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
+    def complete(
+        self, system: str, user: str, schema: dict[str, Any], on_text: Any = None
+    ) -> dict[str, Any]:
         ids = requested_ids(user)
         self.requests.append(ids)
         behaviour = self.behaviours.pop(0) if self.behaviours else "ok"
@@ -135,7 +138,9 @@ def test_model_errors_are_reported_not_raised() -> None:
 
 def test_merged_task_collects_corrections() -> None:
     class MergedModel(ScriptedModel):
-        def complete(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
+        def complete(
+            self, system: str, user: str, schema: dict[str, Any], on_text: Any = None
+        ) -> dict[str, Any]:
             assert "source" in json.dumps(schema)
             return {
                 "translations": [
@@ -183,7 +188,9 @@ def test_merged_message_asks_for_corrected_source() -> None:
 class FlaggingModel:
     description = "flagging"
 
-    def complete(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
+    def complete(
+        self, system: str, user: str, schema: dict[str, Any], on_text: Any = None
+    ) -> dict[str, Any]:
         assert "unclear" in schema["properties"]["translations"]["items"]["properties"]
         assert '"unclear": ...' in user
         return {
@@ -204,3 +211,18 @@ def test_review_reports_the_segments_marked_unclear() -> None:
 
 def test_translation_does_not_ask_for_unclear_segments() -> None:
     assert "unclear" not in build_user_message([{"id": 0, "text": "hola"}], SPANISH_TO_ENGLISH)
+
+
+def test_progress_moves_while_the_model_writes_each_line() -> None:
+    seen: list[float] = []
+    counter = line_counter(seen.append, 2, 10)
+    assert counter is not None
+    for piece in [
+        '{"translations": [{"id": 4, "te',
+        'xt": "a"}, {"id',
+        '": 5, "text": "b"}, ',
+        '{"id": 6',
+    ]:
+        counter(piece)
+    assert seen == [0.3, 0.4]
+    assert line_counter(None, 0, 10) is None

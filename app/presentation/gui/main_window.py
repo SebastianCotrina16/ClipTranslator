@@ -566,8 +566,9 @@ class MainWindow(QMainWindow):
             self._cancel_button.setEnabled(False)
             self._stage.setText("Cancelling after the current step…")
 
-    def _on_progress(self, overall: float, stage: str) -> None:
-        self._set_progress(overall, self._with_queue_prefix(f"{stage_label(stage)}…"))
+    def _on_progress(self, overall: float, stage: str, detail: str = "") -> None:
+        text = f"{stage_label(stage)}… {detail}" if detail else f"{stage_label(stage)}…"
+        self._set_progress(overall, self._with_queue_prefix(text))
 
     def _on_success(self, pipeline: Pipeline) -> None:
         self._pipeline = pipeline

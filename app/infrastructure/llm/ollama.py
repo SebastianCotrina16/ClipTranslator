@@ -11,10 +11,14 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.application.ports import LanguageModelError
+from app.application.ports import LanguageModelError, TextCallback
 from app.application.setup_advisor import translation_model_size
 from app.infrastructure.gpu import free_vram_mb
-from app.infrastructure.llm.http import parse_json_object, post_json, validated_base_url
+from app.infrastructure.llm.http import (
+    ERROR_BODY_PREVIEW,
+    parse_json_object,
+    validated_base_url,
+)
 from app.infrastructure.process import start_in_background, stop_process_tree
 from app.infrastructure.system_probe import ollama_executable
 
@@ -66,6 +70,18 @@ def stop_launched_servers() -> int:
             stop_process_tree(process)
             stopped += 1
     return stopped
+
+
+def _event_from(line: str) -> dict[str, Any]:
+    try:
+        event = json.loads(line)
+    except ValueError as error:
+        raise LanguageModelError("Ollama: unreadable response") from error
+    if not isinstance(event, dict):
+        raise LanguageModelError("Ollama: unreadable response")
+    if "error" in event:
+        raise LanguageModelError(f"Ollama: {event['error']}")
+    return event
 
 
 class OllamaModel:
@@ -168,7 +184,13 @@ class OllamaModel:
         if progress and event.get("total"):
             progress(event.get("completed", 0) / event["total"], event.get("status", ""))
 
-    def complete(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
+    def complete(
+        self,
+        system: str,
+        user: str,
+        schema: dict[str, Any],
+        on_text: TextCallback | None = None,
+    ) -> dict[str, Any]:
         self._context = max(self._context, context_size_for(system, user))
         options: dict[str, Any] = {
             "temperature": self.temperature,
@@ -183,19 +205,45 @@ class OllamaModel:
                 {"role": "user", "content": user},
             ],
             "format": schema,
-            "stream": False,
+            "stream": True,
             "think": False,
             "options": options,
         }
         try:
-            data = post_json(self._client, f"{self.url}/api/chat", payload, "Ollama")
+            data = self._stream_chat(payload, on_text)
         except LanguageModelError as error:
             if "think" not in str(error):
                 raise
             payload.pop("think")
-            data = post_json(self._client, f"{self.url}/api/chat", payload, "Ollama")
+            data = self._stream_chat(payload, on_text)
         self._record(data)
         return parse_json_object(data["message"]["content"])
+
+    def _stream_chat(self, payload: dict[str, Any], on_text: TextCallback | None) -> dict[str, Any]:
+        parts: list[str] = []
+        final: dict[str, Any] = {}
+        try:
+            with self._client.stream("POST", f"{self.url}/api/chat", json=payload) as response:
+                if response.status_code >= 400:
+                    body = response.read().decode("utf-8", "replace")
+                    raise LanguageModelError(
+                        f"Ollama {response.status_code}: {body[:ERROR_BODY_PREVIEW]}"
+                    )
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    event = _event_from(line)
+                    piece = event.get("message", {}).get("content", "")
+                    if piece:
+                        parts.append(piece)
+                        if on_text is not None:
+                            on_text(piece)
+                    if event.get("done"):
+                        final = event
+        except httpx.HTTPError as error:
+            raise LanguageModelError(f"Ollama: {error}") from error
+        final["message"] = {"content": "".join(parts)}
+        return final
 
     def take_timings(self) -> dict[str, float]:
         taken, self._timings = self._timings, empty_timings()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -111,6 +112,36 @@ def render_clip_video(
     return output
 
 
+MODEL_STAGES = {Stage.REVIEW.value, Stage.TRANSLATION.value}
+MIN_ESTIMATE_FRACTION = 0.05
+MIN_ESTIMATE_SECONDS = 5.0
+
+
+def time_left(seconds: float) -> str:
+    if seconds < 60:
+        return "less than a minute left"
+    return f"about {round(seconds / 60)} min left"
+
+
+class StepClock:
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._stage = ""
+        self._start = 0.0
+
+    def detail(self, stage: str, fraction: float) -> str:
+        now = self._clock()
+        if stage != self._stage:
+            self._stage, self._start = stage, now
+        if stage not in MODEL_STAGES or not 0 < fraction < 1:
+            return ""
+        percent = f"{fraction:.0%} of this step"
+        elapsed = now - self._start
+        if fraction < MIN_ESTIMATE_FRACTION or elapsed < MIN_ESTIMATE_SECONDS:
+            return percent
+        return f"{percent} · {time_left(elapsed * (1 - fraction) / fraction)}"
+
+
 def overall_progress(stage: str, fraction: float) -> float:
     try:
         index = STAGE_ORDER.index(Stage(stage))
@@ -120,7 +151,7 @@ def overall_progress(stage: str, fraction: float) -> float:
 
 
 class SubtitleJob(QObject):
-    progressed = Signal(float, str)
+    progressed = Signal(float, str, str)
     busy_gpu = Signal(int)
     language_detected = Signal(str, float)
     succeeded = Signal(object)
@@ -137,6 +168,7 @@ class SubtitleJob(QObject):
         self._shared = shared
         self._cancel = threading.Event()
         self._owner: threading.Thread | None = None
+        self._clock = StepClock()
 
     def cancel(self) -> None:
         self._cancel.set()
@@ -198,7 +230,8 @@ class SubtitleJob(QObject):
             self.busy_gpu.emit(busy)
 
     def _report(self, stage: str, fraction: float, message: str) -> None:
-        self.progressed.emit(overall_progress(stage, fraction), stage)
+        detail = self._clock.detail(stage, fraction)
+        self.progressed.emit(overall_progress(stage, fraction), stage, detail)
         if threading.current_thread() is self._owner:
             self._stop_if_cancelled()
 

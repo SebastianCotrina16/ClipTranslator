@@ -110,7 +110,9 @@ class EchoModel:
     def prepare(self, progress: Any = None) -> list[str]:
         return []
 
-    def complete(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
+    def complete(
+        self, system: str, user: str, schema: dict[str, Any], on_text: Any = None
+    ) -> dict[str, Any]:
         payload = user.split("Segments to translate:\n", 1)[1].split("\n\n", 1)[0]
         [item] = json.loads(payload)["segments"]
         return {"translations": [{"id": item["id"], "text": f"EN {item['text']}"}]}

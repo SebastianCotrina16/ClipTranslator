@@ -132,7 +132,9 @@ class PromptModel:
     def prepare(self, progress: Any = None) -> list[str]:
         return []
 
-    def complete(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
+    def complete(
+        self, system: str, user: str, schema: dict[str, Any], on_text: Any = None
+    ) -> dict[str, Any]:
         self.request = user
         items = json.loads(user.split("Prompts:\n", 1)[1].split("\n\n", 1)[0])["prompts"]
         answers = {"Hollow knight": "Hollow knight", "лиса толстая": "Fat fox", "Геворг": "Guevo"}
